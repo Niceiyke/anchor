@@ -8,7 +8,8 @@ RUN npm run build
 
 FROM golang:1.26-alpine AS api
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY pkg ./pkg
 COPY internal ./internal
 COPY cmd ./cmd
@@ -19,6 +20,9 @@ RUN adduser -D -u 10001 anchor
 WORKDIR /app
 COPY --from=api /anchor-cp /usr/local/bin/anchor-cp
 COPY --from=web /web/dist /app/web
+# /data holds the SQLite DB; must be writable by the non-root anchor user.
+# Owning it in the image also sets the ownership a fresh named volume inherits.
+RUN mkdir -p /data && chown -R anchor:anchor /data
 ENV ANCHOR_ADDR=:8080
 ENV ANCHOR_DB=/data/anchor.db
 ENV ANCHOR_WEB_DIR=/app/web
