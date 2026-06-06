@@ -74,6 +74,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/apps/{id}", s.requireAuth(s.handleGetApp))
 	s.mux.HandleFunc("DELETE /api/apps/{id}", s.requireAuth(s.handleDeleteApp))
 	s.mux.HandleFunc("POST /api/apps/{id}/deploy", s.requireAuth(s.handleDeployApp))
+	s.mux.HandleFunc("POST /api/apps/{id}/attach-db", s.requireAuth(s.handleAttachDB))
+	s.mux.HandleFunc("POST /api/apps/{id}/env", s.requireAuth(s.handleSetEnv))
+	s.mux.HandleFunc("DELETE /api/apps/{id}/env/{key}", s.requireAuth(s.handleDeleteEnv))
 
 	// --- Deployments ---
 	s.mux.HandleFunc("GET /api/apps/{id}/deployments", s.requireAuth(s.handleListDeployments))

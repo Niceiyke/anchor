@@ -158,6 +158,12 @@ Status (`provisioning → running`, or `unreachable` if the server's agent drops
 is reported back by the agent. Deleting a database removes the container and, by
 default, its data volume (`?keep_volume=true` to preserve it).
 
+**Attach to an app:** on an app's page, the **Environment** section lets you
+one-click attach any database on the *same server* — it injects the connection
+string as an env var (`DATABASE_URL` / `REDIS_URL` by default, or a custom name).
+You can also add/remove env vars by hand. Changes apply on the next deploy
+(env vars become the compose `.env` / `docker run -e` flags).
+
 ## Storage
 
 Defaults to **SQLite** at `anchor.db` (pure-Go `modernc.org/sqlite`, no CGO).
@@ -190,7 +196,7 @@ the VPS and it's live.
 - [x] In-UI terminal (live command execution over SSE)
 - [x] Live container log viewer (list + cancellable follow)
 - [x] Managed databases (Postgres/Redis, persistent volumes, conn strings)
-- [ ] One-click attach DB connection string into an app's env vars
+- [x] One-click attach DB connection string into an app's env vars
 - [ ] Rollbacks + deployment history diffing
 - [ ] Multi-user + RBAC
 - [ ] Health checks + zero-downtime swaps

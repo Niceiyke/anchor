@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type App, type Deployment, type LogLine } from "../api";
+import { api, type App, type Deployment, type LogLine, type Database } from "../api";
 
 export function AppDetail() {
   const { appId } = useParams({ from: "/app-layout/apps/$appId" });
@@ -38,6 +38,9 @@ export function AppDetail() {
       )}
       {deploy.isError && <div className="error">{(deploy.error as Error).message}</div>}
 
+      {app && <EnvSection app={app} />}
+
+      <h3 style={{ marginBottom: 0 }}>Deployments</h3>
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, marginTop: 16 }}>
         <div className="card" style={{ padding: 8 }}>
           {deployments.map((d) => (
@@ -61,6 +64,85 @@ export function AppDetail() {
       </div>
     </>
   );
+}
+
+function EnvSection({ app }: { app: App }) {
+  const qc = useQueryClient();
+  const { data: databases = [] } = useQuery({ queryKey: ["databases"], queryFn: () => api.get<Database[]>("/api/databases") });
+
+  // databases on the same server can be reached over anchor_net
+  const sameServerDBs = databases.filter((d) => d.server_id === app.server_id);
+  const [dbId, setDbId] = useState("");
+  const [varName, setVarName] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reveal, setReveal] = useState(false);
+
+  const selectedDb = sameServerDBs.find((d) => d.id === dbId);
+  const suggestedVar = selectedDb ? (selectedDb.engine === "redis" ? "REDIS_URL" : "DATABASE_URL") : "";
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ["app", app.id] });
+
+  const attach = useMutation({
+    mutationFn: () => api.post<{ attached_var: string; same_server: boolean }>(`/api/apps/${app.id}/attach-db`, { database_id: dbId, var_name: varName || suggestedVar }),
+    onSuccess: (res) => {
+      setNotice(`Attached as ${res.attached_var}. Redeploy to apply.`);
+      setDbId(""); setVarName("");
+      refresh();
+    },
+  });
+
+  const removeVar = useMutation({
+    mutationFn: (key: string) => api.del(`/api/apps/${app.id}/env/${encodeURIComponent(key)}`),
+    onSuccess: refresh,
+  });
+
+  const entries = Object.entries(app.env_vars || {});
+
+  return (
+    <div className="card">
+      <strong>Environment</strong>
+
+      <div style={{ marginTop: 10 }}>
+        {entries.length === 0 && <div className="muted">No environment variables yet.</div>}
+        {entries.map(([k, v]) => (
+          <div className="row" key={k} style={{ padding: "4px 0", fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
+            <span><b>{k}</b>=<span className="muted">{reveal ? v : maskValue(v)}</span></span>
+            <button className="btn secondary" onClick={() => removeVar.mutate(k)}>Remove</button>
+          </div>
+        ))}
+        {entries.length > 0 && (
+          <button className="btn secondary" style={{ marginTop: 6 }} onClick={() => setReveal((r) => !r)}>{reveal ? "Hide values" : "Show values"}</button>
+        )}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
+        <label>Attach a database</label>
+        {sameServerDBs.length === 0 ? (
+          <div className="muted">No databases on this app's server. Create one on the Databases page (same server) to attach it.</div>
+        ) : (
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <select style={{ flex: 2 }} value={dbId} onChange={(e) => { setDbId(e.target.value); setNotice(""); }}>
+              <option value="">Select a database…</option>
+              {sameServerDBs.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.engine})</option>)}
+            </select>
+            <input style={{ flex: 1 }} placeholder={suggestedVar || "VAR_NAME"} value={varName} onChange={(e) => setVarName(e.target.value)} />
+            <button className="btn" disabled={!dbId || attach.isPending} onClick={() => attach.mutate()}>
+              {attach.isPending ? "Attaching…" : "Attach"}
+            </button>
+          </div>
+        )}
+        {notice && <div className="muted" style={{ marginTop: 8, color: "var(--green)" }}>{notice}</div>}
+        {attach.isError && <div className="error">{(attach.error as Error).message}</div>}
+      </div>
+    </div>
+  );
+}
+
+function maskValue(v: string) {
+  // mask passwords inside URLs; otherwise show first/last few chars
+  if (v.includes("://")) return v.replace(/:[^:@/]+@/, ":••••••@");
+  if (v.length <= 6) return "••••";
+  return v.slice(0, 3) + "••••" + v.slice(-2);
 }
 
 function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
