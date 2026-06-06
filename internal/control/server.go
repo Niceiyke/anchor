@@ -53,6 +53,32 @@ func New(st store.Store, adminUser, adminPass string) (*Server, error) {
 
 func (s *Server) Handler() http.Handler { return s.mux }
 
+// EnsureLocalServer registers a server with a fixed agent token if none with
+// that token exists yet. Used to bootstrap an agent that runs alongside the
+// control plane (e.g. the all-in-one docker-compose stack) so the host appears
+// as a deploy target without a manual "Add server" step.
+func (s *Server) EnsureLocalServer(name, token string) error {
+	if token == "" {
+		return nil
+	}
+	if _, err := s.store.GetServerByToken(token); err == nil {
+		return nil // already registered
+	}
+	if name == "" {
+		name = "local"
+	}
+	if err := s.store.CreateServer(store.Server{
+		ID:         "srv_" + randToken()[:12],
+		Name:       name,
+		AgentToken: token,
+		CreatedAt:  time.Now(),
+	}); err != nil {
+		return err
+	}
+	log.Printf("bootstrapped local server %q", name)
+	return nil
+}
+
 func (s *Server) routes() {
 	// --- Agent-facing (agent bearer token) ---
 	s.mux.HandleFunc("GET /agent/v1/stream", s.handleAgentStream)

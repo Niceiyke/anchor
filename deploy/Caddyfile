@@ -1,9 +1,14 @@
-# Public Caddy for the Anchor control plane.
-# Caddy terminates TLS (auto HTTPS) and reverse-proxies to the Go API.
+# Unified Caddy for the all-in-one VPS: serves the Anchor dashboard AND the
+# apps deployed on this host. Caddy terminates TLS (automatic HTTPS) for every
+# domain.
 #
-# Set ANCHOR_DOMAIN in .env to your dashboard domain (e.g. anchor.example.com).
-# Use ":80" for local testing without TLS.
+# - The dashboard site proxies to the control plane.
+# - Each deployed app drops a `<domain> { reverse_proxy <app>:<port> }` snippet
+#   into /etc/caddy/apps (written by the agent), imported below. Caddy and the
+#   app containers share the anchor_net network, so it reaches them by name.
 
 {$ANCHOR_DOMAIN} {
 	reverse_proxy control-plane:8080
 }
+
+import /etc/caddy/apps/*.caddy

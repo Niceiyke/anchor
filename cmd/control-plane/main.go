@@ -55,6 +55,13 @@ func main() {
 	}
 	srv.ServeSPA(os.Getenv("ANCHOR_WEB_DIR")) // serve built UI in production
 
+	// Optional: auto-register a co-located agent (all-in-one compose stack).
+	if tok := os.Getenv("ANCHOR_BOOTSTRAP_AGENT_TOKEN"); tok != "" {
+		if err := srv.EnsureLocalServer(env("ANCHOR_BOOTSTRAP_SERVER_NAME", "this-vps"), tok); err != nil {
+			log.Printf("bootstrap local server: %v", err)
+		}
+	}
+
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           withCORS(srv.Handler()),

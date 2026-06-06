@@ -78,17 +78,41 @@ The server flips to **online** and live CPU/mem/disk/container stats appear.
 
 ## Production deploy
 
-**Control plane** (run on any host/VPS — needs a public domain for HTTPS + the
-GitHub webhook):
+Point your dashboard domain's DNS at the VPS, then:
 
 ```bash
 cp .env.example .env        # set admin creds + ANCHOR_DOMAIN
 docker compose up -d --build
 ```
 
-This starts the control plane behind Caddy (automatic HTTPS).
+This starts the control plane behind **Caddy** (automatic HTTPS for
+`ANCHOR_DOMAIN`). Open `https://<ANCHOR_DOMAIN>` and log in.
 
-**Each VPS you want to deploy to:**
+### All-in-one: host apps on the *same* VPS
+
+The bundled Caddy is **unified** — it serves the dashboard *and* the apps you
+deploy on this host, so there's no second Caddy and no port clash. To also run a
+local agent (making this VPS a deploy target), set a shared token in `.env` and
+enable the `agent` profile:
+
+```bash
+# in .env:
+ANCHOR_LOCAL_AGENT_TOKEN=$(openssl rand -hex 32)   # generate once
+ANCHOR_LOCAL_SERVER_NAME=this-vps
+
+docker compose --profile agent up -d --build
+```
+
+The control plane auto-registers this host as a server (no manual "Add server"),
+and the agent runs as a container with the Docker socket mounted — it builds and
+runs your app containers on the host daemon and writes their routes into the same
+Caddy. Apps reach managed databases by container name over `anchor_net`. Deploy
+an app with a domain whose DNS points here and Caddy provisions its cert too.
+
+> Separate VPSes are still supported and unchanged — install the standalone
+> agent (below). Use the all-in-one only on the box that also runs the dashboard.
+
+**Each *additional* VPS you want to deploy to:**
 
 ```bash
 make agent-linux            # cross-compile -> bin/anchor-agent-linux

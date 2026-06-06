@@ -1,0 +1,16 @@
+# Agent image for running the agent as a container on the control-plane host.
+# It shells out to `docker`, `docker compose`, and `git`, so the image bundles
+# the Docker CLI (talking to the host daemon via the mounted socket) + git.
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY pkg ./pkg
+COPY internal ./internal
+COPY cmd ./cmd
+RUN CGO_ENABLED=0 go build -o /anchor-agent ./cmd/agent
+
+FROM docker:27-cli
+RUN apk add --no-cache git docker-cli-compose
+COPY --from=build /anchor-agent /usr/local/bin/anchor-agent
+ENTRYPOINT ["anchor-agent"]

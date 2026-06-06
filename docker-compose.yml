@@ -1,8 +1,9 @@
-# Anchor control plane + public Caddy.
-# Run this where you want the dashboard to live (can be one of your VPSes).
+# Anchor — all-in-one VPS stack: control plane + unified Caddy + (optional) a
+# local agent so this same host can also run deployed apps.
 #
-#   cp .env.example .env   # then edit ADMIN creds + domain
-#   docker compose up -d --build
+#   cp .env.example .env   # set admin creds, ANCHOR_DOMAIN, and a shared token
+#   docker compose up -d --build                 # dashboard only
+#   docker compose --profile agent up -d --build # dashboard + deploy on this host
 #
 services:
   control-plane:
@@ -11,12 +12,16 @@ services:
     environment:
       ANCHOR_ADMIN_USER: ${ANCHOR_ADMIN_USER:-admin}
       ANCHOR_ADMIN_PASS: ${ANCHOR_ADMIN_PASS:-changeme}
+      # auto-register the co-located agent (see the `agent` service)
+      ANCHOR_BOOTSTRAP_AGENT_TOKEN: ${ANCHOR_LOCAL_AGENT_TOKEN:-}
+      ANCHOR_BOOTSTRAP_SERVER_NAME: ${ANCHOR_LOCAL_SERVER_NAME:-this-vps}
     volumes:
       - anchor-data:/data
     networks: [anchor_net]
 
   caddy:
     image: caddy:2-alpine
+    container_name: anchor-caddy
     restart: unless-stopped
     ports:
       - "80:80"
@@ -25,14 +30,38 @@ services:
       ANCHOR_DOMAIN: ${ANCHOR_DOMAIN:-localhost}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-apps:/etc/caddy/apps   # per-app route snippets (written by the agent)
       - caddy-data:/data
       - caddy-config:/config
+    networks: [anchor_net]
+
+  # Optional local agent: lets THIS host run deployed apps. Enable with:
+  #   docker compose --profile agent up -d --build
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    profiles: ["agent"]
+    depends_on: [control-plane]
+    environment:
+      ANCHOR_URL: http://control-plane:8080     # talk to the CP over the internal network
+      ANCHOR_TOKEN: ${ANCHOR_LOCAL_AGENT_TOKEN:-}
+      ANCHOR_WORKDIR: /var/lib/anchor/apps
+      ANCHOR_CADDY_DIR: /etc/caddy/apps          # write app route snippets here...
+      ANCHOR_CADDY_RELOAD: docker exec anchor-caddy caddy reload --config /etc/caddy/Caddyfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # build/run app containers on the host daemon
+      - caddy-apps:/etc/caddy/apps                # ...shared with the caddy service
+      - agent-work:/var/lib/anchor/apps           # persistent clone/build workdir
     networks: [anchor_net]
 
 volumes:
   anchor-data:
   caddy-data:
   caddy-config:
+  caddy-apps:
+  agent-work:
 
 networks:
   anchor_net:
