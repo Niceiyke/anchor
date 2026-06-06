@@ -1,0 +1,39 @@
+# Anchor control plane + public Caddy.
+# Run this where you want the dashboard to live (can be one of your VPSes).
+#
+#   cp .env.example .env   # then edit ADMIN creds + domain
+#   docker compose up -d --build
+#
+services:
+  control-plane:
+    build: .
+    restart: unless-stopped
+    environment:
+      ANCHOR_ADMIN_USER: ${ANCHOR_ADMIN_USER:-admin}
+      ANCHOR_ADMIN_PASS: ${ANCHOR_ADMIN_PASS:-changeme}
+    volumes:
+      - anchor-data:/data
+    networks: [anchor_net]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ANCHOR_DOMAIN: ${ANCHOR_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [anchor_net]
+
+volumes:
+  anchor-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  anchor_net:
+    name: anchor_net

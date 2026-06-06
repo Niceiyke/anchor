@@ -1,0 +1,7 @@
+/bin/
+/anchor.json
+/anchor.json.tmp
+*.log
+.env
+web/node_modules/
+web/dist/

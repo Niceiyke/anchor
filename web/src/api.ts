@@ -1,0 +1,91 @@
+// Thin fetch wrapper. The session token lives in a cookie (set by the API on
+// login), so requests just need credentials: "include".
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    credentials: "include",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, text || res.statusText);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  get: <T>(p: string) => request<T>("GET", p),
+  post: <T>(p: string, b?: unknown) => request<T>("POST", p, b),
+  put: <T>(p: string, b?: unknown) => request<T>("PUT", p, b),
+  del: <T>(p: string) => request<T>("DELETE", p),
+};
+
+// ---- Types (mirror the Go store models) ----
+
+export interface Stats {
+  cpu_percent: number;
+  mem_used: number;
+  mem_total: number;
+  disk_used: number;
+  disk_total: number;
+  containers: number;
+}
+
+export interface Server {
+  id: string;
+  name: string;
+  agent_token?: string;
+  online: boolean;
+  last_seen: string;
+  stats?: Stats;
+  created_at: string;
+}
+
+export interface App {
+  id: string;
+  name: string;
+  server_id: string;
+  repo_full_name: string;
+  repo_url: string;
+  branch: string;
+  domain: string;
+  container_port: number;
+  auto_deploy: boolean;
+  env_vars: Record<string, string>;
+  created_at: string;
+}
+
+export interface LogLine {
+  stream: string;
+  line: string;
+  at: string;
+}
+
+export interface Deployment {
+  id: string;
+  app_id: string;
+  commit_sha: string;
+  branch: string;
+  phase: string;
+  stack_type: string;
+  message: string;
+  logs?: LogLine[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Repo {
+  full_name: string;
+  clone_url: string;
+  default_branch: string;
+  private: boolean;
+}

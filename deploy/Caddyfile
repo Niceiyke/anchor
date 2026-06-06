@@ -1,0 +1,9 @@
+# Public Caddy for the Anchor control plane.
+# Caddy terminates TLS (auto HTTPS) and reverse-proxies to the Go API.
+#
+# Set ANCHOR_DOMAIN in .env to your dashboard domain (e.g. anchor.example.com).
+# Use ":80" for local testing without TLS.
+
+{$ANCHOR_DOMAIN} {
+	reverse_proxy control-plane:8080
+}

@@ -1,0 +1,331 @@
+// Package store is the persistence layer for the control plane.
+//
+// The MVP uses a single JSON file guarded by a mutex. Everything is accessed
+// through the Store interface so it can later be swapped for SQLite/Postgres
+// without changing the HTTP handlers.
+package store
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"sort"
+	"sync"
+	"time"
+)
+
+var ErrNotFound = errors.New("not found")
+
+// ---- Domain models ---------------------------------------------------------
+
+// Server is a VPS running an agent.
+type Server struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	AgentToken string    `json:"agent_token"` // bearer token the agent presents
+	Online     bool      `json:"online"`
+	LastSeen   time.Time `json:"last_seen"`
+	Stats      *Stats    `json:"stats,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Stats is the last reported system snapshot for a server.
+type Stats struct {
+	CPUPercent float64   `json:"cpu_percent"`
+	MemUsed    uint64    `json:"mem_used"`
+	MemTotal   uint64    `json:"mem_total"`
+	DiskUsed   uint64    `json:"disk_used"`
+	DiskTotal  uint64    `json:"disk_total"`
+	Containers int       `json:"containers"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// App is a deployable project bound to a GitHub repo and a target server.
+type App struct {
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	ServerID      string            `json:"server_id"`
+	RepoFullName  string            `json:"repo_full_name"` // owner/repo
+	RepoURL       string            `json:"repo_url"`
+	Branch        string            `json:"branch"`
+	Domain        string            `json:"domain"`
+	ContainerPort int               `json:"container_port"`
+	AutoDeploy    bool              `json:"auto_deploy"`
+	EnvVars       map[string]string `json:"env_vars"`
+	CreatedAt     time.Time         `json:"created_at"`
+}
+
+// Deployment is a single build+run attempt for an App.
+type Deployment struct {
+	ID        string    `json:"id"`
+	AppID     string    `json:"app_id"`
+	CommitSHA string    `json:"commit_sha"`
+	Branch    string    `json:"branch"`
+	Phase     string    `json:"phase"`
+	StackType string    `json:"stack_type"`
+	Message   string    `json:"message"`
+	Logs      []LogLine `json:"logs"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type LogLine struct {
+	Stream string    `json:"stream"`
+	Line   string    `json:"line"`
+	At     time.Time `json:"at"`
+}
+
+// Settings holds singleton config (admin creds, GitHub app, etc).
+type Settings struct {
+	AdminUser     string `json:"admin_user"`
+	AdminPass     string `json:"admin_pass_hash"` // bcrypt-like; MVP uses sha256
+	GitHubToken   string `json:"github_token"`    // PAT for repo access in MVP
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// ---- Store interface -------------------------------------------------------
+
+type Store interface {
+	Settings() (Settings, error)
+	SaveSettings(Settings) error
+
+	ListServers() ([]Server, error)
+	GetServer(id string) (Server, error)
+	GetServerByToken(token string) (Server, error)
+	CreateServer(Server) error
+	UpdateServer(Server) error
+	DeleteServer(id string) error
+
+	ListApps() ([]App, error)
+	GetApp(id string) (App, error)
+	AppsByRepo(fullName string) ([]App, error)
+	CreateApp(App) error
+	UpdateApp(App) error
+	DeleteApp(id string) error
+
+	ListDeployments(appID string) ([]Deployment, error)
+	GetDeployment(id string) (Deployment, error)
+	CreateDeployment(Deployment) error
+	UpdateDeployment(Deployment) error
+}
+
+// ---- JSON file implementation ---------------------------------------------
+
+type data struct {
+	Settings    Settings              `json:"settings"`
+	Servers     map[string]Server     `json:"servers"`
+	Apps        map[string]App        `json:"apps"`
+	Deployments map[string]Deployment `json:"deployments"`
+}
+
+type jsonStore struct {
+	mu   sync.RWMutex
+	path string
+	d    data
+}
+
+// Open loads (or initializes) the JSON store at path.
+func Open(path string) (Store, error) {
+	s := &jsonStore{path: path, d: data{
+		Servers:     map[string]Server{},
+		Apps:        map[string]App{},
+		Deployments: map[string]Deployment{},
+	}}
+	b, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(b, &s.d); err != nil {
+			return nil, err
+		}
+		if s.d.Servers == nil {
+			s.d.Servers = map[string]Server{}
+		}
+		if s.d.Apps == nil {
+			s.d.Apps = map[string]App{}
+		}
+		if s.d.Deployments == nil {
+			s.d.Deployments = map[string]Deployment{}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return s, nil
+}
+
+// flush writes the in-memory data to disk atomically. Caller holds the lock.
+func (s *jsonStore) flush() error {
+	b, err := json.MarshalIndent(s.d, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
+}
+
+func (s *jsonStore) Settings() (Settings, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.d.Settings, nil
+}
+
+func (s *jsonStore) SaveSettings(v Settings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Settings = v
+	return s.flush()
+}
+
+func (s *jsonStore) ListServers() ([]Server, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Server, 0, len(s.d.Servers))
+	for _, v := range s.d.Servers {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *jsonStore) GetServer(id string) (Server, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.d.Servers[id]
+	if !ok {
+		return Server{}, ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *jsonStore) GetServerByToken(token string) (Server, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.d.Servers {
+		if v.AgentToken == token {
+			return v, nil
+		}
+	}
+	return Server{}, ErrNotFound
+}
+
+func (s *jsonStore) CreateServer(v Server) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Servers[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) UpdateServer(v Server) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.d.Servers[v.ID]; !ok {
+		return ErrNotFound
+	}
+	s.d.Servers[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) DeleteServer(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.d.Servers, id)
+	return s.flush()
+}
+
+func (s *jsonStore) ListApps() ([]App, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]App, 0, len(s.d.Apps))
+	for _, v := range s.d.Apps {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *jsonStore) GetApp(id string) (App, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.d.Apps[id]
+	if !ok {
+		return App{}, ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *jsonStore) AppsByRepo(fullName string) ([]App, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []App
+	for _, v := range s.d.Apps {
+		if v.RepoFullName == fullName {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+func (s *jsonStore) CreateApp(v App) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Apps[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) UpdateApp(v App) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.d.Apps[v.ID]; !ok {
+		return ErrNotFound
+	}
+	s.d.Apps[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) DeleteApp(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.d.Apps, id)
+	return s.flush()
+}
+
+func (s *jsonStore) ListDeployments(appID string) ([]Deployment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []Deployment
+	for _, v := range s.d.Deployments {
+		if appID == "" || v.AppID == appID {
+			out = append(out, v)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *jsonStore) GetDeployment(id string) (Deployment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.d.Deployments[id]
+	if !ok {
+		return Deployment{}, ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *jsonStore) CreateDeployment(v Deployment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Deployments[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) UpdateDeployment(v Deployment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.d.Deployments[v.ID]; !ok {
+		return ErrNotFound
+	}
+	s.d.Deployments[v.ID] = v
+	return s.flush()
+}
