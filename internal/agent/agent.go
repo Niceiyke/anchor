@@ -131,6 +131,18 @@ func (a *Agent) dispatch(ctx context.Context, cmd protocol.Command) {
 			return
 		}
 		a.listContainers(ctx, req)
+	case protocol.CmdProvisionDB:
+		var req protocol.ProvisionDBRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.provisionDB(ctx, req)
+	case protocol.CmdRemoveDB:
+		var req protocol.RemoveDBRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.removeDB(ctx, req)
 	case protocol.CmdStopApp:
 		var req protocol.StopAppRequest
 		if err := json.Unmarshal(cmd.Data, &req); err != nil {

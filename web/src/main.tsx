@@ -17,6 +17,7 @@ import { Apps } from "./pages/Apps";
 import { AppDetail } from "./pages/AppDetail";
 import { Terminal } from "./pages/Terminal";
 import { Logs } from "./pages/Logs";
+import { Databases } from "./pages/Databases";
 import { Settings } from "./pages/Settings";
 import "./index.css";
 
@@ -77,6 +78,12 @@ const logsRoute = createRoute({
   component: Logs,
 });
 
+const databasesRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/databases",
+  component: Databases,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/settings",
@@ -85,7 +92,7 @@ const settingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appLayoutRoute.addChildren([serversRoute, appsRoute, appDetailRoute, terminalRoute, logsRoute, settingsRoute]),
+  appLayoutRoute.addChildren([serversRoute, appsRoute, appDetailRoute, databasesRoute, terminalRoute, logsRoute, settingsRoute]),
 ]);
 
 const router = createRouter({ routeTree, context: { queryClient } });

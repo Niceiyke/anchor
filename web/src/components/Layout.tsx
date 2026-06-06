@@ -14,6 +14,7 @@ export function Layout() {
         <nav>
           <Link to="/" activeOptions={{ exact: true }}>Servers</Link>
           <Link to="/apps">Applications</Link>
+          <Link to="/databases">Databases</Link>
           <Link to="/logs">Container Logs</Link>
           <Link to="/terminal">Terminal</Link>
           <Link to="/settings">Settings</Link>

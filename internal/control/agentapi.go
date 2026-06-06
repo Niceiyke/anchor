@@ -168,5 +168,17 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 			return
 		}
 		s.deliverReply(cl.RequestID, evt)
+
+	case protocol.EvtDBStatus:
+		var ds protocol.DBStatus
+		if json.Unmarshal(evt.Data, &ds) != nil {
+			return
+		}
+		if db, err := s.store.GetDatabase(ds.DatabaseID); err == nil {
+			db.Status = ds.Status
+			db.Message = ds.Message
+			_ = s.store.UpdateDatabase(db)
+			s.broadcast("database:"+ds.DatabaseID, evt)
+		}
 	}
 }

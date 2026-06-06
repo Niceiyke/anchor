@@ -94,6 +94,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/servers/{id}/logs", s.requireAuth(s.handleStreamLogs))
 	s.mux.HandleFunc("DELETE /api/servers/{id}/logs/{rid}", s.requireAuth(s.handleStopLogs))
 
+	// --- Managed databases ---
+	s.mux.HandleFunc("GET /api/databases", s.requireAuth(s.handleListDatabases))
+	s.mux.HandleFunc("POST /api/databases", s.requireAuth(s.handleCreateDatabase))
+	s.mux.HandleFunc("GET /api/databases/{id}", s.requireAuth(s.handleGetDatabase))
+	s.mux.HandleFunc("DELETE /api/databases/{id}", s.requireAuth(s.handleDeleteDatabase))
+
 	// --- Live (browser SSE) ---
 	s.mux.HandleFunc("GET /api/events", s.requireAuth(s.handleEventStream))
 

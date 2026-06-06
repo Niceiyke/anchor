@@ -141,6 +141,23 @@ sends a stop command so the agent kills the underlying `docker logs` process
 (no orphaned follows). Container listing uses a request/reply over the agent
 channel with an 8s timeout.
 
+## Managed databases
+
+**Databases** provisions **PostgreSQL** or **Redis** as a container on a target
+server, with a persistent named volume and generated credentials. The agent
+runs the image on the `anchor_net` network, so apps on the same server reach it
+by its container hostname — no host port required (you can optionally expose
+one). The control plane generates the connection string, e.g.:
+
+```
+postgres://anchor:<pw>@anchor-db-mydb:5432/mydb?sslmode=disable
+redis://:<pw>@anchor-db-cache:6379
+```
+
+Status (`provisioning → running`, or `unreachable` if the server's agent drops)
+is reported back by the agent. Deleting a database removes the container and, by
+default, its data volume (`?keep_volume=true` to preserve it).
+
 ## Storage
 
 Defaults to **SQLite** at `anchor.db` (pure-Go `modernc.org/sqlite`, no CGO).
@@ -172,7 +189,8 @@ the VPS and it's live.
 - [x] GitHub App (manifest flow, installation tokens, auto webhook)
 - [x] In-UI terminal (live command execution over SSE)
 - [x] Live container log viewer (list + cancellable follow)
-- [ ] Managed databases (Postgres/Redis as first-class deployable services)
+- [x] Managed databases (Postgres/Redis, persistent volumes, conn strings)
+- [ ] One-click attach DB connection string into an app's env vars
 - [ ] Rollbacks + deployment history diffing
 - [ ] Multi-user + RBAC
 - [ ] Health checks + zero-downtime swaps

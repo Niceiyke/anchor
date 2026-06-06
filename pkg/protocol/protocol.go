@@ -22,6 +22,8 @@ const (
 	CmdStopStream     CommandType = "stop_stream"
 	CmdListContainers CommandType = "list_containers"
 	CmdStopApp        CommandType = "stop_app"
+	CmdProvisionDB    CommandType = "provision_db"
+	CmdRemoveDB       CommandType = "remove_db"
 	CmdPing           CommandType = "ping"
 )
 
@@ -77,6 +79,28 @@ type StopAppRequest struct {
 	AppName string `json:"app_name"`
 }
 
+// ProvisionDBRequest is the payload for CmdProvisionDB. The control plane
+// computes the container name and credentials; the agent runs the container.
+type ProvisionDBRequest struct {
+	DatabaseID string `json:"database_id"`
+	Container  string `json:"container"` // docker container + in-network hostname
+	Volume     string `json:"volume"`    // named docker volume for persistence
+	Engine     string `json:"engine"`    // postgres | redis
+	Version    string `json:"version"`   // image tag
+	Username   string `json:"username"`  // postgres
+	Password   string `json:"password"`
+	DBName     string `json:"db_name"`   // postgres database name
+	HostPort   int    `json:"host_port"` // 0 = internal only (anchor_net)
+}
+
+// RemoveDBRequest is the payload for CmdRemoveDB.
+type RemoveDBRequest struct {
+	DatabaseID   string `json:"database_id"`
+	Container    string `json:"container"`
+	Volume       string `json:"volume"`
+	DeleteVolume bool   `json:"delete_volume"`
+}
+
 // ---- Agent -> Control plane ------------------------------------------------
 
 type EventType string
@@ -87,6 +111,7 @@ const (
 	EvtSystemStats   EventType = "system_stats"
 	EvtCommandResult EventType = "command_result"
 	EvtContainerList EventType = "container_list"
+	EvtDBStatus      EventType = "db_status"
 )
 
 // Event is a single message reported by an agent.
@@ -146,6 +171,13 @@ type ContainerInfo struct {
 type ContainerList struct {
 	RequestID  string          `json:"request_id"`
 	Containers []ContainerInfo `json:"containers"`
+}
+
+// DBStatus is the payload for EvtDBStatus.
+type DBStatus struct {
+	DatabaseID string `json:"database_id"`
+	Status     string `json:"status"` // provisioning | running | failed | removed
+	Message    string `json:"message"`
 }
 
 // SystemStats is the payload for EvtSystemStats.

@@ -89,3 +89,22 @@ export interface Repo {
   default_branch: string;
   private: boolean;
 }
+
+export interface Database {
+  id: string;
+  name: string;
+  server_id: string;
+  engine: string;
+  version: string;
+  status: string;
+  message: string;
+  container: string;
+  host: string;
+  port: number;
+  host_port: number;
+  username: string;
+  password: string;
+  db_name: string;
+  conn_uri: string;
+  created_at: string;
+}

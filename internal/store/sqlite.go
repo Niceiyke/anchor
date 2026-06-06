@@ -78,6 +78,25 @@ CREATE TABLE IF NOT EXISTS deployment_logs (
 	at            TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_logs_dep ON deployment_logs(deployment_id, id);
+CREATE TABLE IF NOT EXISTS databases (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	server_id  TEXT NOT NULL,
+	engine     TEXT NOT NULL,
+	version    TEXT,
+	status     TEXT,
+	message    TEXT,
+	container  TEXT,
+	volume     TEXT,
+	host       TEXT,
+	port       INTEGER,
+	host_port  INTEGER,
+	username   TEXT,
+	password   TEXT,
+	db_name    TEXT,
+	conn_uri   TEXT,
+	created_at TEXT NOT NULL
+);
 `)
 	return err
 }
@@ -386,6 +405,67 @@ func (s *sqliteStore) UpdateDeployment(v Deployment) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// ---- Databases ----
+
+const dbCols = `id, name, server_id, engine, version, status, message, container, volume, host, port, host_port, username, password, db_name, conn_uri, created_at`
+
+func scanDatabase(r scanner) (Database, error) {
+	var v Database
+	var createdAt string
+	if err := r.Scan(&v.ID, &v.Name, &v.ServerID, &v.Engine, &v.Version, &v.Status, &v.Message,
+		&v.Container, &v.Volume, &v.Host, &v.Port, &v.HostPort, &v.Username, &v.Password,
+		&v.DBName, &v.ConnURI, &createdAt); err != nil {
+		return v, err
+	}
+	v.CreatedAt = tsParse(createdAt)
+	return v, nil
+}
+
+func (s *sqliteStore) ListDatabases() ([]Database, error) {
+	rows, err := s.db.Query(`SELECT ` + dbCols + ` FROM databases ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Database
+	for rows.Next() {
+		v, err := scanDatabase(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) GetDatabase(id string) (Database, error) {
+	row := s.db.QueryRow(`SELECT `+dbCols+` FROM databases WHERE id = ?`, id)
+	v, err := scanDatabase(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Database{}, ErrNotFound
+	}
+	return v, err
+}
+
+func (s *sqliteStore) CreateDatabase(v Database) error {
+	_, err := s.db.Exec(`INSERT INTO databases (`+dbCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		v.ID, v.Name, v.ServerID, v.Engine, v.Version, v.Status, v.Message, v.Container, v.Volume,
+		v.Host, v.Port, v.HostPort, v.Username, v.Password, v.DBName, v.ConnURI, tsFmt(v.CreatedAt))
+	return err
+}
+
+func (s *sqliteStore) UpdateDatabase(v Database) error {
+	res, err := s.db.Exec(`UPDATE databases SET name=?, server_id=?, engine=?, version=?, status=?, message=?, container=?, volume=?, host=?, port=?, host_port=?, username=?, password=?, db_name=?, conn_uri=? WHERE id=?`,
+		v.Name, v.ServerID, v.Engine, v.Version, v.Status, v.Message, v.Container, v.Volume,
+		v.Host, v.Port, v.HostPort, v.Username, v.Password, v.DBName, v.ConnURI, v.ID)
+	return affected(res, err)
+}
+
+func (s *sqliteStore) DeleteDatabase(id string) error {
+	_, err := s.db.Exec(`DELETE FROM databases WHERE id = ?`, id)
+	return err
 }
 
 // ---- small helpers ----

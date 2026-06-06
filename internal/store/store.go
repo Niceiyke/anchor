@@ -75,6 +75,28 @@ type LogLine struct {
 	At     time.Time `json:"at"`
 }
 
+// Database is a managed datastore (Postgres/Redis) running as a container on a
+// target server, reachable by apps on the anchor_net network by Container name.
+type Database struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	ServerID  string    `json:"server_id"`
+	Engine    string    `json:"engine"`  // postgres | redis
+	Version   string    `json:"version"` // image tag
+	Status    string    `json:"status"`  // provisioning | running | failed | stopped
+	Message   string    `json:"message"`
+	Container string    `json:"container"` // docker name + in-network hostname
+	Volume    string    `json:"volume"`
+	Host      string    `json:"host"` // = Container (in-network)
+	Port      int       `json:"port"`
+	HostPort  int       `json:"host_port"` // 0 = internal only
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	DBName    string    `json:"db_name"`
+	ConnURI   string    `json:"conn_uri"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Settings holds singleton config (admin creds, GitHub config, etc).
 type Settings struct {
 	AdminUser     string `json:"admin_user"`
@@ -121,6 +143,12 @@ type Store interface {
 	GetDeployment(id string) (Deployment, error)
 	CreateDeployment(Deployment) error
 	UpdateDeployment(Deployment) error
+
+	ListDatabases() ([]Database, error)
+	GetDatabase(id string) (Database, error)
+	CreateDatabase(Database) error
+	UpdateDatabase(Database) error
+	DeleteDatabase(id string) error
 }
 
 // ---- JSON file implementation ---------------------------------------------
@@ -130,6 +158,7 @@ type data struct {
 	Servers     map[string]Server     `json:"servers"`
 	Apps        map[string]App        `json:"apps"`
 	Deployments map[string]Deployment `json:"deployments"`
+	Databases   map[string]Database   `json:"databases"`
 }
 
 type jsonStore struct {
@@ -144,6 +173,7 @@ func Open(path string) (Store, error) {
 		Servers:     map[string]Server{},
 		Apps:        map[string]App{},
 		Deployments: map[string]Deployment{},
+		Databases:   map[string]Database{},
 	}}
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -158,6 +188,9 @@ func Open(path string) (Store, error) {
 		}
 		if s.d.Deployments == nil {
 			s.d.Deployments = map[string]Deployment{}
+		}
+		if s.d.Databases == nil {
+			s.d.Databases = map[string]Database{}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -341,5 +374,50 @@ func (s *jsonStore) UpdateDeployment(v Deployment) error {
 		return ErrNotFound
 	}
 	s.d.Deployments[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) ListDatabases() ([]Database, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Database, 0, len(s.d.Databases))
+	for _, v := range s.d.Databases {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *jsonStore) GetDatabase(id string) (Database, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.d.Databases[id]
+	if !ok {
+		return Database{}, ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *jsonStore) CreateDatabase(v Database) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Databases[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) UpdateDatabase(v Database) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.d.Databases[v.ID]; !ok {
+		return ErrNotFound
+	}
+	s.d.Databases[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) DeleteDatabase(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.d.Databases, id)
 	return s.flush()
 }
