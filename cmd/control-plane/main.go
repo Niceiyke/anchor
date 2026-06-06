@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,16 +24,27 @@ func env(key, def string) string {
 	return def
 }
 
+// openStore picks the backend by file extension: .json -> JSON file store,
+// anything else -> SQLite (the durable default).
+func openStore(path string) (store.Store, error) {
+	if strings.HasSuffix(path, ".json") {
+		log.Printf("using JSON store at %s", path)
+		return store.Open(path)
+	}
+	log.Printf("using SQLite store at %s", path)
+	return store.OpenSQLite(path)
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[anchor] ")
 
 	addr := env("ANCHOR_ADDR", ":8080")
-	dbPath := env("ANCHOR_DB", "anchor.json")
+	dbPath := env("ANCHOR_DB", "anchor.db")
 	adminUser := env("ANCHOR_ADMIN_USER", "admin")
 	adminPass := env("ANCHOR_ADMIN_PASS", "admin")
 
-	st, err := store.Open(dbPath)
+	st, err := openStore(dbPath)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}

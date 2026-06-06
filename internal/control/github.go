@@ -10,12 +10,23 @@ import (
 	"strings"
 )
 
-// handleGitHubRepos lists repos the configured token can access. MVP uses a
-// personal access token (stored in settings). Swap for a GitHub App later.
+// handleGitHubRepos lists deployable repos. Prefers the GitHub App installation
+// (short-lived token); falls back to a personal access token if set.
 func (s *Server) handleGitHubRepos(w http.ResponseWriter, r *http.Request) {
 	settings, _ := s.store.Settings()
+
+	if settings.GitHubAppConfigured() {
+		repos, err := s.listInstallationRepos()
+		if err != nil {
+			http.Error(w, "github app: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, repos)
+		return
+	}
+
 	if settings.GitHubToken == "" {
-		http.Error(w, "no github token configured", http.StatusPreconditionRequired)
+		http.Error(w, "no github app or token configured", http.StatusPreconditionRequired)
 		return
 	}
 	req, _ := http.NewRequest("GET", "https://api.github.com/user/repos?per_page=100&sort=updated", nil)
@@ -32,12 +43,7 @@ func (s *Server) handleGitHubRepos(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "github: "+string(b), http.StatusBadGateway)
 		return
 	}
-	var repos []struct {
-		FullName      string `json:"full_name"`
-		CloneURL      string `json:"clone_url"`
-		DefaultBranch string `json:"default_branch"`
-		Private       bool   `json:"private"`
-	}
+	var repos []repo
 	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -53,9 +59,8 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}
-	settings, _ := s.store.Settings()
-	if settings.WebhookSecret != "" {
-		if !validSignature(settings.WebhookSecret, r.Header.Get("X-Hub-Signature-256"), body) {
+	if secret := s.githubWebhookSecret(); secret != "" {
+		if !validSignature(secret, r.Header.Get("X-Hub-Signature-256"), body) {
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}

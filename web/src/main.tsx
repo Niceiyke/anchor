@@ -15,6 +15,8 @@ import { Login } from "./pages/Login";
 import { Servers } from "./pages/Servers";
 import { Apps } from "./pages/Apps";
 import { AppDetail } from "./pages/AppDetail";
+import { Terminal } from "./pages/Terminal";
+import { Settings } from "./pages/Settings";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -62,9 +64,21 @@ const appDetailRoute = createRoute({
   component: AppDetail,
 });
 
+const terminalRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/terminal",
+  component: Terminal,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/settings",
+  component: Settings,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appLayoutRoute.addChildren([serversRoute, appsRoute, appDetailRoute]),
+  appLayoutRoute.addChildren([serversRoute, appsRoute, appDetailRoute, terminalRoute, settingsRoute]),
 ]);
 
 const router = createRouter({ routeTree, context: { queryClient } });

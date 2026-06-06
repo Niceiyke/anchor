@@ -26,8 +26,6 @@ func (s *Server) triggerDeploy(app store.App, commitSHA string) (store.Deploymen
 		return dep, err
 	}
 
-	settings, _ := s.store.Settings()
-
 	req := protocol.DeployRequest{
 		DeploymentID:  dep.ID,
 		AppID:         app.ID,
@@ -35,7 +33,7 @@ func (s *Server) triggerDeploy(app store.App, commitSHA string) (store.Deploymen
 		RepoURL:       app.RepoURL,
 		Branch:        app.Branch,
 		CommitSHA:     commitSHA,
-		GitToken:      settings.GitHubToken,
+		GitToken:      s.githubCloneToken(),
 		Domain:        app.Domain,
 		ContainerPort: app.ContainerPort,
 		EnvVars:       app.EnvVars,

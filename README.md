@@ -43,9 +43,9 @@ multi-service Go + Caddy + DB stacks) → otherwise a root `Dockerfile`.
 ```
 cmd/control-plane    control plane entrypoint
 cmd/agent            VPS agent entrypoint
-internal/control     API, agent hub, auth, github, deploy orchestration, SSE
+internal/control     API, agent hub, auth, github app, deploy, exec, SSE
 internal/agent       command loop, deploy pipeline, caddy, system stats
-internal/store       persistence (JSON file behind a Store interface)
+internal/store       persistence: SQLite (default) + JSON, behind Store interface
 pkg/protocol         shared command/event message types
 web/                 React + TanStack Router + Query dashboard
 deploy/              Caddyfiles for control plane + per-VPS app router
@@ -102,17 +102,41 @@ sudo ANCHOR_URL=https://anchor.example.com ANCHOR_TOKEN=<token from dashboard> \
 The installer sets up the `anchor_net` Docker network, a Caddy container that
 routes app domains, and a `systemd` service for the agent.
 
+## Connecting GitHub
+
+Two options, in **Settings**:
+
+1. **GitHub App (recommended)** — click **Connect GitHub App**. This uses the
+   GitHub *manifest flow*: you're sent to GitHub to create a pre-configured app
+   in one click, redirected back (we store its private key + secrets), then sent
+   to install it on the repos you want. From then on Anchor mints short-lived
+   installation tokens for listing repos and cloning, and the push webhook is
+   configured automatically. Requires the control plane to be reachable at a
+   public URL (GitHub must redirect back and deliver webhooks).
+2. **Personal access token (fallback)** — paste a PAT with `repo` scope. For
+   auto-deploy, add a repo webhook → `https://anchor.example.com/webhooks/github`
+   (content type `application/json`, event `push`, secret from Settings).
+
 ## Deploy flow
 
-1. **Settings → GitHub token** — paste a PAT with `repo` scope (MVP; a GitHub
-   App can replace this later).
-2. **Applications → Deploy a new app** — pick a repo, target server, branch,
+1. **Applications → Deploy a new app** — pick a repo, target server, branch,
    domain, container port, and toggle auto-deploy.
-3. **Deploy now**, or push to the branch. Watch logs stream live.
+2. **Deploy now**, or push to the branch. Watch logs stream live.
 
-**Auto-deploy on push:** add a GitHub webhook → `https://anchor.example.com/webhooks/github`,
-content type `application/json`, secret = the value shown in Settings, event =
-`push`. On push, every app bound to that repo+branch with auto-deploy redeploys.
+On push, every app bound to that repo+branch with auto-deploy redeploys.
+
+## Terminal
+
+**Terminal** runs an ad-hoc shell command on any online server (via the agent,
+`sh -c`) and streams stdout/stderr live over SSE, ending with the exit code.
+Output is live-only (not persisted). Handy for `docker ps`, `df -h`, tailing,
+quick fixes.
+
+## Storage
+
+Defaults to **SQLite** at `anchor.db` (pure-Go `modernc.org/sqlite`, no CGO).
+Set `ANCHOR_DB` to a path ending in `.json` to use the simple JSON store
+instead. Both implement the same `store.Store` interface.
 
 ## Routing & HTTPS
 
@@ -127,19 +151,20 @@ the VPS and it's live.
 ## Security notes (MVP → harden before public exposure)
 
 - Admin password is hashed with SHA-256 — **swap for bcrypt/argon2**.
-- GitHub access uses a stored PAT — migrate to a **GitHub App** with
-  short-lived installation tokens.
-- Sessions are in-memory; agent tokens are bearer strings in the JSON store.
-- The JSON store is single-node; move to **SQLite/Postgres** behind the existing
-  `store.Store` interface for durability and concurrency.
+- Sessions are in-memory; agent tokens are bearer strings in the store.
+- GitHub App private key + secrets are stored in plaintext in the DB —
+  **encrypt at rest** (or use a secrets manager) before exposing publicly.
+- The Terminal runs arbitrary shell commands on the VPS as the agent user —
+  it's behind admin auth, but treat access accordingly.
 
 ## Roadmap
 
-- [ ] SQLite store implementation (interface already in place)
-- [ ] GitHub App (replace PAT, auto-manage webhooks)
+- [x] SQLite store (default; JSON still available)
+- [x] GitHub App (manifest flow, installation tokens, auto webhook)
+- [x] In-UI terminal (live command execution over SSE)
 - [ ] Managed databases (Postgres/Redis as first-class deployable services)
+- [ ] Live container log viewer (agent `stream_logs` already implemented)
 - [ ] Rollbacks + deployment history diffing
-- [ ] In-UI terminal (run commands) and live container log viewer
 - [ ] Multi-user + RBAC
 - [ ] Health checks + zero-downtime swaps
 ```

@@ -75,12 +75,26 @@ type LogLine struct {
 	At     time.Time `json:"at"`
 }
 
-// Settings holds singleton config (admin creds, GitHub app, etc).
+// Settings holds singleton config (admin creds, GitHub config, etc).
 type Settings struct {
 	AdminUser     string `json:"admin_user"`
 	AdminPass     string `json:"admin_pass_hash"` // bcrypt-like; MVP uses sha256
-	GitHubToken   string `json:"github_token"`    // PAT for repo access in MVP
-	WebhookSecret string `json:"webhook_secret"`
+	GitHubToken   string `json:"github_token"`    // optional PAT fallback
+	WebhookSecret string `json:"webhook_secret"`  // used when no GitHub App configured
+
+	// GitHub App (preferred). Populated via the manifest flow.
+	GitHubAppID            int64  `json:"github_app_id"`
+	GitHubAppSlug          string `json:"github_app_slug"`
+	GitHubAppPrivateKey    string `json:"github_app_private_key"` // PEM
+	GitHubAppWebhookSecret string `json:"github_app_webhook_secret"`
+	GitHubClientID         string `json:"github_client_id"`
+	GitHubClientSecret     string `json:"github_client_secret"`
+	GitHubInstallationID   int64  `json:"github_installation_id"`
+}
+
+// GitHubAppConfigured reports whether a GitHub App is fully set up.
+func (s Settings) GitHubAppConfigured() bool {
+	return s.GitHubAppID != 0 && s.GitHubAppPrivateKey != ""
 }
 
 // ---- Store interface -------------------------------------------------------

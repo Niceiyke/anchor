@@ -181,9 +181,12 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, _ := s.store.Settings()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"admin_user":         settings.AdminUser,
-		"github_token_set":   settings.GitHubToken != "",
-		"webhook_secret_set": settings.WebhookSecret != "",
+		"admin_user":            settings.AdminUser,
+		"github_token_set":      settings.GitHubToken != "",
+		"webhook_secret_set":    settings.WebhookSecret != "",
+		"github_app_configured": settings.GitHubAppConfigured(),
+		"github_app_installed":  settings.GitHubInstallationID != 0,
+		"github_app_slug":       settings.GitHubAppSlug,
 	})
 }
 

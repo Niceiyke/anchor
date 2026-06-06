@@ -9,26 +9,33 @@ import (
 	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
-// runCommand executes an arbitrary shell command and reports the result.
+// runCommand executes an arbitrary shell command, streaming its output live as
+// log events (tagged with the request id) and a final result with the exit code.
 func (a *Agent) runCommand(ctx context.Context, req protocol.RunCommandRequest) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", req.Command)
 	if req.WorkDir != "" {
 		cmd.Dir = req.WorkDir
 	}
-	out, err := cmd.CombinedOutput()
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+
+	if err := cmd.Start(); err != nil {
+		a.emitLog("", req.RequestID, "stderr", err.Error())
+		a.emit(protocol.EvtCommandResult, protocol.CommandResult{RequestID: req.RequestID, ExitCode: -1})
+		return
+	}
+	go a.pipeReqLogs(req.RequestID, "stdout", stdout)
+	a.pipeReqLogs(req.RequestID, "stderr", stderr)
+
 	exit := 0
-	if err != nil {
+	if err := cmd.Wait(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			exit = ee.ExitCode()
 		} else {
 			exit = -1
 		}
 	}
-	a.emit(protocol.EvtCommandResult, protocol.CommandResult{
-		RequestID: req.RequestID,
-		ExitCode:  exit,
-		Output:    string(out),
-	})
+	a.emit(protocol.EvtCommandResult, protocol.CommandResult{RequestID: req.RequestID, ExitCode: exit})
 }
 
 // streamLogs tails docker logs for an app and forwards them as log events.

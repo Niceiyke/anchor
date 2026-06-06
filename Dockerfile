@@ -20,7 +20,7 @@ WORKDIR /app
 COPY --from=api /anchor-cp /usr/local/bin/anchor-cp
 COPY --from=web /web/dist /app/web
 ENV ANCHOR_ADDR=:8080
-ENV ANCHOR_DB=/data/anchor.json
+ENV ANCHOR_DB=/data/anchor.db
 ENV ANCHOR_WEB_DIR=/app/web
 VOLUME /data
 USER anchor

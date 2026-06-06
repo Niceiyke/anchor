@@ -10,11 +10,12 @@ import (
 
 // Server is the Anchor control plane: HTTP API + agent hub + live broadcaster.
 type Server struct {
-	store store.Store
-	hub   *Hub
-	auth  *auth
-	live  *broadcaster
-	mux   *http.ServeMux
+	store        store.Store
+	hub          *Hub
+	auth         *auth
+	live         *broadcaster
+	mux          *http.ServeMux
+	ghTokenCache *tokenCache
 }
 
 // New wires up the control plane. It ensures an admin credential exists.
@@ -74,7 +75,13 @@ func (s *Server) routes() {
 
 	// --- GitHub ---
 	s.mux.HandleFunc("GET /api/github/repos", s.requireAuth(s.handleGitHubRepos))
+	s.mux.HandleFunc("GET /api/github/app/manifest", s.requireAuth(s.handleGitHubAppManifest))
+	s.mux.HandleFunc("GET /api/github/app/callback", s.requireAuth(s.handleGitHubAppCallback))
+	s.mux.HandleFunc("GET /api/github/setup", s.requireAuth(s.handleGitHubSetup))
 	s.mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
+
+	// --- Terminal / exec ---
+	s.mux.HandleFunc("POST /api/servers/{id}/exec", s.requireAuth(s.handleExec))
 
 	// --- Live (browser SSE) ---
 	s.mux.HandleFunc("GET /api/events", s.requireAuth(s.handleEventStream))

@@ -14,6 +14,8 @@ export function Layout() {
         <nav>
           <Link to="/" activeOptions={{ exact: true }}>Servers</Link>
           <Link to="/apps">Applications</Link>
+          <Link to="/terminal">Terminal</Link>
+          <Link to="/settings">Settings</Link>
         </nav>
         <div style={{ marginTop: 24 }}>
           <button className="btn secondary" onClick={logout}>Log out</button>

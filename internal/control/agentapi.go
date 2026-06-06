@@ -139,7 +139,8 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 		if json.Unmarshal(evt.Data, &ll) != nil {
 			return
 		}
-		if ll.DeploymentID != "" {
+		switch {
+		case ll.DeploymentID != "":
 			if dep, err := s.store.GetDeployment(ll.DeploymentID); err == nil {
 				dep.Logs = append(dep.Logs, store.LogLine{Stream: ll.Stream, Line: ll.Line, At: evt.Timestamp})
 				if len(dep.Logs) > 5000 {
@@ -149,9 +150,16 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 				_ = s.store.UpdateDeployment(dep)
 			}
 			s.broadcast(deploymentTopic(ll.DeploymentID), evt)
+		case ll.RequestID != "":
+			// live terminal/exec output — not persisted
+			s.broadcast(execTopic(ll.RequestID), evt)
 		}
 
 	case protocol.EvtCommandResult:
-		s.broadcast("server:"+serverID, evt)
+		var cr protocol.CommandResult
+		if json.Unmarshal(evt.Data, &cr) != nil {
+			return
+		}
+		s.broadcast(execTopic(cr.RequestID), evt)
 	}
 }
