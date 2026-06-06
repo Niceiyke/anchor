@@ -3,8 +3,10 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"os/exec"
+	"strings"
 
 	"github.com/oyomworld/anchor/pkg/protocol"
 )
@@ -38,13 +40,32 @@ func (a *Agent) runCommand(ctx context.Context, req protocol.RunCommandRequest) 
 	a.emit(protocol.EvtCommandResult, protocol.CommandResult{RequestID: req.RequestID, ExitCode: exit})
 }
 
-// streamLogs tails docker logs for an app and forwards them as log events.
+// streamLogs follows docker logs for a container and forwards each line as a
+// log event tagged with the request id. The follow is cancellable via
+// stopStream (registered in a.streams). A final command_result marks the end.
 func (a *Agent) streamLogs(ctx context.Context, req protocol.StreamLogsRequest) {
+	target := req.Container
+	if target == "" {
+		target = sanitize(req.AppName)
+	}
 	tail := "200"
 	if req.Tail > 0 {
 		tail = itoaPos(req.Tail)
 	}
-	cmd := exec.CommandContext(ctx, "docker", "logs", "--tail", tail, "-f", sanitize(req.AppName))
+
+	sctx, cancel := context.WithCancel(ctx)
+	a.streamsMu.Lock()
+	a.streams[req.RequestID] = cancel
+	a.streamsMu.Unlock()
+	defer func() {
+		cancel()
+		a.streamsMu.Lock()
+		delete(a.streams, req.RequestID)
+		a.streamsMu.Unlock()
+		a.emit(protocol.EvtCommandResult, protocol.CommandResult{RequestID: req.RequestID, ExitCode: 0})
+	}()
+
+	cmd := exec.CommandContext(sctx, "docker", "logs", "--tail", tail, "--timestamps", "-f", target)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
@@ -54,6 +75,50 @@ func (a *Agent) streamLogs(ctx context.Context, req protocol.StreamLogsRequest) 
 	go a.pipeReqLogs(req.RequestID, "stdout", stdout)
 	a.pipeReqLogs(req.RequestID, "stderr", stderr)
 	_ = cmd.Wait()
+}
+
+// stopStream cancels an active log follow.
+func (a *Agent) stopStream(req protocol.StopStreamRequest) {
+	a.streamsMu.Lock()
+	if cancel, ok := a.streams[req.RequestID]; ok {
+		cancel()
+	}
+	a.streamsMu.Unlock()
+}
+
+// listContainers reports the docker containers on this host.
+func (a *Agent) listContainers(ctx context.Context, req protocol.ListContainersRequest) {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--no-trunc", "--format", "{{json .}}").Output()
+	list := protocol.ContainerList{RequestID: req.RequestID, Containers: []protocol.ContainerInfo{}}
+	if err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var row struct {
+				ID     string `json:"ID"`
+				Names  string `json:"Names"`
+				Image  string `json:"Image"`
+				State  string `json:"State"`
+				Status string `json:"Status"`
+			}
+			if json.Unmarshal([]byte(line), &row) != nil {
+				continue
+			}
+			id := row.ID
+			if len(id) > 12 {
+				id = id[:12]
+			}
+			list.Containers = append(list.Containers, protocol.ContainerInfo{
+				ID:     id,
+				Name:   strings.TrimPrefix(row.Names, "/"),
+				Image:  row.Image,
+				State:  row.State,
+				Status: row.Status,
+			})
+		}
+	}
+	a.emit(protocol.EvtContainerList, list)
 }
 
 // stopApp stops and removes an app's container(s).

@@ -16,11 +16,13 @@ import (
 type CommandType string
 
 const (
-	CmdDeploy     CommandType = "deploy"
-	CmdRunCommand CommandType = "run_command"
-	CmdStreamLogs CommandType = "stream_logs"
-	CmdStopApp    CommandType = "stop_app"
-	CmdPing       CommandType = "ping"
+	CmdDeploy         CommandType = "deploy"
+	CmdRunCommand     CommandType = "run_command"
+	CmdStreamLogs     CommandType = "stream_logs"
+	CmdStopStream     CommandType = "stop_stream"
+	CmdListContainers CommandType = "list_containers"
+	CmdStopApp        CommandType = "stop_app"
+	CmdPing           CommandType = "ping"
 )
 
 // Command is a single instruction pushed to an agent over the stream.
@@ -51,11 +53,23 @@ type RunCommandRequest struct {
 	WorkDir   string `json:"work_dir"`
 }
 
-// StreamLogsRequest is the payload for CmdStreamLogs.
+// StreamLogsRequest is the payload for CmdStreamLogs. Container takes precedence;
+// AppName is the fallback (resolved to the app's container name).
 type StreamLogsRequest struct {
 	RequestID string `json:"request_id"`
+	Container string `json:"container"`
 	AppName   string `json:"app_name"`
 	Tail      int    `json:"tail"`
+}
+
+// StopStreamRequest cancels an in-flight log follow (CmdStopStream).
+type StopStreamRequest struct {
+	RequestID string `json:"request_id"`
+}
+
+// ListContainersRequest is the payload for CmdListContainers.
+type ListContainersRequest struct {
+	RequestID string `json:"request_id"`
 }
 
 // StopAppRequest is the payload for CmdStopApp.
@@ -72,6 +86,7 @@ const (
 	EvtDeployStatus  EventType = "deploy_status"
 	EvtSystemStats   EventType = "system_stats"
 	EvtCommandResult EventType = "command_result"
+	EvtContainerList EventType = "container_list"
 )
 
 // Event is a single message reported by an agent.
@@ -116,6 +131,21 @@ type CommandResult struct {
 	RequestID string `json:"request_id"`
 	ExitCode  int    `json:"exit_code"`
 	Output    string `json:"output"`
+}
+
+// ContainerInfo describes one container reported by the agent.
+type ContainerInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	State  string `json:"state"`  // running | exited | ...
+	Status string `json:"status"` // "Up 3 hours", "Exited (0) 5m ago"
+}
+
+// ContainerList is the payload for EvtContainerList.
+type ContainerList struct {
+	RequestID  string          `json:"request_id"`
+	Containers []ContainerInfo `json:"containers"`
 }
 
 // SystemStats is the payload for EvtSystemStats.

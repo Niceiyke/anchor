@@ -161,5 +161,12 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 			return
 		}
 		s.broadcast(execTopic(cr.RequestID), evt)
+
+	case protocol.EvtContainerList:
+		var cl protocol.ContainerList
+		if json.Unmarshal(evt.Data, &cl) != nil {
+			return
+		}
+		s.deliverReply(cl.RequestID, evt)
 	}
 }

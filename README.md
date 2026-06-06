@@ -132,6 +132,15 @@ On push, every app bound to that repo+branch with auto-deploy redeploys.
 Output is live-only (not persisted). Handy for `docker ps`, `df -h`, tailing,
 quick fixes.
 
+## Container Logs
+
+**Container Logs** lists every container on a server (`docker ps -a`) and
+live-tails any one of them (`docker logs --timestamps -f`), streaming to the
+browser over SSE. The follow is cancellable — closing the view or hitting Pause
+sends a stop command so the agent kills the underlying `docker logs` process
+(no orphaned follows). Container listing uses a request/reply over the agent
+channel with an 8s timeout.
+
 ## Storage
 
 Defaults to **SQLite** at `anchor.db` (pure-Go `modernc.org/sqlite`, no CGO).
@@ -162,8 +171,8 @@ the VPS and it's live.
 - [x] SQLite store (default; JSON still available)
 - [x] GitHub App (manifest flow, installation tokens, auto webhook)
 - [x] In-UI terminal (live command execution over SSE)
+- [x] Live container log viewer (list + cancellable follow)
 - [ ] Managed databases (Postgres/Redis as first-class deployable services)
-- [ ] Live container log viewer (agent `stream_logs` already implemented)
 - [ ] Rollbacks + deployment history diffing
 - [ ] Multi-user + RBAC
 - [ ] Health checks + zero-downtime swaps

@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/oyomworld/anchor/pkg/protocol"
@@ -29,13 +30,17 @@ type Agent struct {
 	cfg    Config
 	client *http.Client
 	events chan protocol.Event // outbound event buffer
+
+	streamsMu sync.Mutex
+	streams   map[string]context.CancelFunc // requestID -> cancel for active log follows
 }
 
 func New(cfg Config) *Agent {
 	return &Agent{
-		cfg:    cfg,
-		client: &http.Client{}, // no timeout: stream is long-lived
-		events: make(chan protocol.Event, 256),
+		cfg:     cfg,
+		client:  &http.Client{}, // no timeout: stream is long-lived
+		events:  make(chan protocol.Event, 256),
+		streams: map[string]context.CancelFunc{},
 	}
 }
 
@@ -114,6 +119,18 @@ func (a *Agent) dispatch(ctx context.Context, cmd protocol.Command) {
 			return
 		}
 		a.streamLogs(ctx, req)
+	case protocol.CmdStopStream:
+		var req protocol.StopStreamRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.stopStream(req)
+	case protocol.CmdListContainers:
+		var req protocol.ListContainersRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.listContainers(ctx, req)
 	case protocol.CmdStopApp:
 		var req protocol.StopAppRequest
 		if err := json.Unmarshal(cmd.Data, &req); err != nil {

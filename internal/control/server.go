@@ -3,9 +3,11 @@ package control
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/oyomworld/anchor/internal/store"
+	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
 // Server is the Anchor control plane: HTTP API + agent hub + live broadcaster.
@@ -16,16 +18,20 @@ type Server struct {
 	live         *broadcaster
 	mux          *http.ServeMux
 	ghTokenCache *tokenCache
+
+	pendingMu sync.Mutex
+	pending   map[string]chan protocol.Event // requestID -> waiter (request/reply)
 }
 
 // New wires up the control plane. It ensures an admin credential exists.
 func New(st store.Store, adminUser, adminPass string) (*Server, error) {
 	s := &Server{
-		store: st,
-		hub:   NewHub(),
-		auth:  newAuth(),
-		live:  newBroadcaster(),
-		mux:   http.NewServeMux(),
+		store:   st,
+		hub:     NewHub(),
+		auth:    newAuth(),
+		live:    newBroadcaster(),
+		mux:     http.NewServeMux(),
+		pending: map[string]chan protocol.Event{},
 	}
 
 	settings, _ := st.Settings()
@@ -82,6 +88,11 @@ func (s *Server) routes() {
 
 	// --- Terminal / exec ---
 	s.mux.HandleFunc("POST /api/servers/{id}/exec", s.requireAuth(s.handleExec))
+
+	// --- Container logs ---
+	s.mux.HandleFunc("GET /api/servers/{id}/containers", s.requireAuth(s.handleListContainers))
+	s.mux.HandleFunc("POST /api/servers/{id}/logs", s.requireAuth(s.handleStreamLogs))
+	s.mux.HandleFunc("DELETE /api/servers/{id}/logs/{rid}", s.requireAuth(s.handleStopLogs))
 
 	// --- Live (browser SSE) ---
 	s.mux.HandleFunc("GET /api/events", s.requireAuth(s.handleEventStream))
