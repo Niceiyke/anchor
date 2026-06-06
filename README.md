@@ -112,6 +112,8 @@ an app with a domain whose DNS points here and Caddy provisions its cert too.
 > Separate VPSes are still supported and unchanged — install the standalone
 > agent (below). Use the all-in-one only on the box that also runs the dashboard.
 
+Day-to-day ops (update, logs, backups) live in [`deploy/UPDATE.md`](deploy/UPDATE.md).
+
 **Each *additional* VPS you want to deploy to:**
 
 ```bash
