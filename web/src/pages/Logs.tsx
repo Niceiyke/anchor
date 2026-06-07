@@ -31,18 +31,41 @@ export function Logs() {
   });
 
   const [active, setActive] = useState<Container | null>(null);
+  const [pruning, setPruning] = useState(false);
+  const [pruneMsg, setPruneMsg] = useState("");
+  const exitedCount = containers.filter((c) => c.state !== "running").length;
+
+  async function prune() {
+    if (!confirm("Remove all stopped containers on this server?")) return;
+    setPruneMsg("");
+    setPruning(true);
+    try {
+      const res = await api.post<{ output: string }>(`/api/servers/${serverId}/containers/prune`);
+      setPruneMsg(res.output?.split("\n").pop() || "Pruned.");
+      if (active && active.state !== "running") setActive(null);
+      refetch();
+    } catch (e) {
+      setPruneMsg((e as Error).message || "Prune failed");
+    } finally {
+      setPruning(false);
+    }
+  }
 
   return (
     <>
       <div className="row">
         <h2>Containers</h2>
         <div className="row" style={{ gap: 8 }}>
-          <select style={{ width: 200 }} value={serverId} onChange={(e) => { setServerId(e.target.value); setActive(null); }}>
+          <select style={{ width: 200 }} value={serverId} onChange={(e) => { setServerId(e.target.value); setActive(null); setPruneMsg(""); }}>
             {servers.map((s) => <option key={s.id} value={s.id} disabled={!s.online}>{s.name}{s.online ? "" : " (offline)"}</option>)}
           </select>
+          <button className="btn secondary" onClick={prune} disabled={pruning || !serverId || exitedCount === 0} title="Remove all stopped containers">
+            {pruning ? "Pruning…" : `Prune exited${exitedCount ? ` (${exitedCount})` : ""}`}
+          </button>
           <button className="btn secondary" onClick={() => refetch()} disabled={isFetching}>↻</button>
         </div>
       </div>
+      {pruneMsg && <div className="muted" style={{ marginTop: 4 }}>{pruneMsg}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16, marginTop: 12 }}>
         <div className="card" style={{ padding: 8 }}>

@@ -154,6 +154,23 @@ func (a *Agent) containerAction(ctx context.Context, req protocol.ContainerActio
 	})
 }
 
+// pruneContainers removes all stopped containers and replies with docker's
+// summary (which containers were deleted and space reclaimed).
+func (a *Agent) pruneContainers(ctx context.Context, req protocol.PruneContainersRequest) {
+	out, err := exec.CommandContext(ctx, "docker", "container", "prune", "-f").CombinedOutput()
+	exit := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exit = ee.ExitCode()
+		} else {
+			exit = -1
+		}
+	}
+	a.emit(protocol.EvtCommandResult, protocol.CommandResult{
+		RequestID: req.RequestID, ExitCode: exit, Output: strings.TrimSpace(string(out)),
+	})
+}
+
 // stopApp stops and removes an app's container(s).
 func (a *Agent) stopApp(ctx context.Context, req protocol.StopAppRequest) {
 	name := sanitize(req.AppName)

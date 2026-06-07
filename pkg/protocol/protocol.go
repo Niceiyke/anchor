@@ -26,6 +26,7 @@ const (
 	CmdListContainers  CommandType = "list_containers"
 	CmdStopApp         CommandType = "stop_app"
 	CmdContainerAction CommandType = "container_action"
+	CmdPruneContainers CommandType = "prune_containers"
 	CmdProvisionDB     CommandType = "provision_db"
 	CmdRemoveDB        CommandType = "remove_db"
 	CmdBackupDB        CommandType = "backup_db"
@@ -93,6 +94,13 @@ type ContainerActionRequest struct {
 	RequestID string `json:"request_id"`
 	Container string `json:"container"`
 	Action    string `json:"action"`
+}
+
+// PruneContainersRequest is the payload for CmdPruneContainers. It removes all
+// stopped containers (docker container prune). The reply is an EvtCommandResult
+// whose output is docker's prune summary.
+type PruneContainersRequest struct {
+	RequestID string `json:"request_id"`
 }
 
 // ProvisionDBRequest is the payload for CmdProvisionDB. The control plane
