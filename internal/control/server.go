@@ -159,6 +159,7 @@ func (s *Server) routes() {
 	// --- Servers ---
 	s.mux.HandleFunc("GET /api/servers", auth(s.handleListServers))
 	s.mux.HandleFunc("POST /api/servers", authCSRF(s.handleCreateServer))
+	s.mux.HandleFunc("PATCH /api/servers/{id}", authCSRF(s.handleUpdateServer))
 	s.mux.HandleFunc("DELETE /api/servers/{id}", authCSRF(s.handleDeleteServer))
 
 	// --- Apps ---
@@ -172,6 +173,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/apps/{id}/stop", authCSRF(s.handleStopApp))
 	s.mux.HandleFunc("POST /api/apps/{id}/attach-db", authCSRF(s.handleAttachDB))
 	s.mux.HandleFunc("POST /api/apps/{id}/env", authCSRF(s.handleSetEnv))
+	s.mux.HandleFunc("POST /api/apps/{id}/env/import", authCSRF(s.handleImportEnv))
 	s.mux.HandleFunc("DELETE /api/apps/{id}/env/{key}", authCSRF(s.handleDeleteEnv))
 
 	// --- Deployments ---

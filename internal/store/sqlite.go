@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS servers (
 	online      INTEGER NOT NULL DEFAULT 0,
 	last_seen   TEXT,
 	stats       TEXT,
+	public_ip   TEXT NOT NULL DEFAULT '',
 	created_at  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS apps (
@@ -132,6 +133,7 @@ CREATE TABLE IF NOT EXISTS users (
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN last_good_sha TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN compose_file TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN env_secret TEXT NOT NULL DEFAULT '{}'`)
+		s.db.Exec(`ALTER TABLE servers ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`)
 	}
 	return err
 }
@@ -183,7 +185,7 @@ func scanStats(raw sql.NullString) *Stats {
 }
 
 func (s *sqliteStore) ListServers() ([]Server, error) {
-	rows, err := s.db.Query(`SELECT id, name, agent_token, online, last_seen, stats, created_at FROM servers ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT ` + serverCols + ` FROM servers ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -203,12 +205,14 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+const serverCols = `id, name, agent_token, online, last_seen, stats, public_ip, created_at`
+
 func scanServer(r scanner) (Server, error) {
 	var v Server
 	var lastSeen, createdAt string
 	var stats sql.NullString
 	var online int
-	if err := r.Scan(&v.ID, &v.Name, &v.AgentToken, &online, &lastSeen, &stats, &createdAt); err != nil {
+	if err := r.Scan(&v.ID, &v.Name, &v.AgentToken, &online, &lastSeen, &stats, &v.PublicIP, &createdAt); err != nil {
 		return v, err
 	}
 	v.Online = online == 1
@@ -219,7 +223,7 @@ func scanServer(r scanner) (Server, error) {
 }
 
 func (s *sqliteStore) GetServer(id string) (Server, error) {
-	row := s.db.QueryRow(`SELECT id, name, agent_token, online, last_seen, stats, created_at FROM servers WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT `+serverCols+` FROM servers WHERE id = ?`, id)
 	v, err := scanServer(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Server{}, ErrNotFound
@@ -228,7 +232,7 @@ func (s *sqliteStore) GetServer(id string) (Server, error) {
 }
 
 func (s *sqliteStore) GetServerByToken(token string) (Server, error) {
-	row := s.db.QueryRow(`SELECT id, name, agent_token, online, last_seen, stats, created_at FROM servers WHERE agent_token = ?`, token)
+	row := s.db.QueryRow(`SELECT `+serverCols+` FROM servers WHERE agent_token = ?`, token)
 	v, err := scanServer(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Server{}, ErrNotFound
@@ -237,15 +241,15 @@ func (s *sqliteStore) GetServerByToken(token string) (Server, error) {
 }
 
 func (s *sqliteStore) CreateServer(v Server) error {
-	_, err := s.db.Exec(`INSERT INTO servers (id, name, agent_token, online, last_seen, stats, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		v.ID, v.Name, v.AgentToken, b2i(v.Online), tsFmt(v.LastSeen), statsJSON(v.Stats), tsFmt(v.CreatedAt))
+	_, err := s.db.Exec(`INSERT INTO servers (`+serverCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		v.ID, v.Name, v.AgentToken, b2i(v.Online), tsFmt(v.LastSeen), statsJSON(v.Stats), v.PublicIP, tsFmt(v.CreatedAt))
 	return err
 }
 
 func (s *sqliteStore) UpdateServer(v Server) error {
-	res, err := s.db.Exec(`UPDATE servers SET name=?, agent_token=?, online=?, last_seen=?, stats=? WHERE id=?`,
-		v.Name, v.AgentToken, b2i(v.Online), tsFmt(v.LastSeen), statsJSON(v.Stats), v.ID)
+	res, err := s.db.Exec(`UPDATE servers SET name=?, agent_token=?, online=?, last_seen=?, stats=?, public_ip=? WHERE id=?`,
+		v.Name, v.AgentToken, b2i(v.Online), tsFmt(v.LastSeen), statsJSON(v.Stats), v.PublicIP, v.ID)
 	return affected(res, err)
 }
 

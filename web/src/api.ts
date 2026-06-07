@@ -58,6 +58,7 @@ export interface Server {
   id: string;
   name: string;
   agent_token?: string;
+  public_ip?: string;
   online: boolean;
   last_seen: string;
   stats?: Stats;

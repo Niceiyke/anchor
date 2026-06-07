@@ -142,21 +142,29 @@ func (c *cfClient) deleteA(token, zoneID, name string) error {
 
 // ---- Server integration ----
 
-// cfConfig returns the API token and target IP if Cloudflare DNS is enabled.
-func (s *Server) cfConfig() (token, ip string, ok bool) {
+// cfConfig returns the API token if Cloudflare DNS is enabled.
+func (s *Server) cfConfig() (token string, ok bool) {
 	settings, _ := s.store.Settings()
 	token = strings.TrimSpace(settings.CloudflareAPIToken)
-	if token == "" {
-		return "", "", false
+	return token, token != ""
+}
+
+// targetIP resolves the IP an app's DNS record should point at: the app's
+// server's PublicIP if set, else the global Settings.PublicIP, else the
+// control plane's auto-detected public IP (correct for the all-in-one host).
+func (s *Server) targetIP(serverID string) string {
+	if serverID != "" {
+		if srv, err := s.store.GetServer(serverID); err == nil {
+			if ip := strings.TrimSpace(srv.PublicIP); ip != "" {
+				return ip
+			}
+		}
 	}
-	ip = strings.TrimSpace(settings.PublicIP)
-	if ip == "" {
-		ip = s.detectPublicIP()
+	settings, _ := s.store.Settings()
+	if ip := strings.TrimSpace(settings.PublicIP); ip != "" {
+		return ip
 	}
-	if ip == "" {
-		return "", "", false
-	}
-	return token, ip, true
+	return s.detectPublicIP()
 }
 
 // detectPublicIP best-effort discovers this host's public IP (cached).
@@ -170,11 +178,16 @@ func (s *Server) detectPublicIP() string {
 	return strings.TrimSpace(string(b))
 }
 
-// cfEnsureDomain creates/updates the A record for domain (best-effort, async).
-func (s *Server) cfEnsureDomain(domain string) {
+// cfEnsureDomain creates/updates the A record for domain pointing at the target
+// server's IP (best-effort, async).
+func (s *Server) cfEnsureDomain(domain, serverID string) {
 	domain = strings.TrimSpace(strings.ToLower(domain))
-	token, ip, ok := s.cfConfig()
+	token, ok := s.cfConfig()
 	if !ok || domain == "" {
+		return
+	}
+	ip := s.targetIP(serverID)
+	if ip == "" {
 		return
 	}
 	zoneID, err := s.cf.zoneIDForDomain(token, domain)
@@ -192,7 +205,7 @@ func (s *Server) cfEnsureDomain(domain string) {
 // cfDeleteDomain removes the A record for domain (best-effort, async).
 func (s *Server) cfDeleteDomain(domain string) {
 	domain = strings.TrimSpace(strings.ToLower(domain))
-	token, _, ok := s.cfConfig()
+	token, ok := s.cfConfig()
 	if !ok || domain == "" {
 		return
 	}
@@ -232,6 +245,5 @@ func (s *Server) handleCloudflareVerify(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "token has no zone covering "+domain, http.StatusBadGateway)
 		return
 	}
-	_, ip, _ := s.cfConfig()
-	writeJSON(w, http.StatusOK, map[string]string{"zone": z.Name, "zone_id": z.ID, "public_ip": ip})
+	writeJSON(w, http.StatusOK, map[string]string{"zone": z.Name, "zone_id": z.ID, "public_ip": s.targetIP("")})
 }

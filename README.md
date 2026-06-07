@@ -164,8 +164,10 @@ for domains Anchor manages.
 - **Cloudflare integration (zero manual DNS):** add a Cloudflare API token in
   **Settings → Cloudflare DNS** (scoped `Zone:DNS:Edit` + `Zone:Read`). Anchor
   then creates an A record for each app domain (and deletes it when the app is
-  removed), pointing at the server's public IP (auto-detected, or set one). Hit
-  **Verify** to confirm the token sees your zone. No wildcard record needed.
+  removed). The record points at the app's **server's public IP** (set per
+  server on the Servers page), falling back to the global Settings IP, then
+  auto-detect. Hit **Verify** to confirm the token sees your zone. No wildcard
+  record needed.
 - **Manual:** add a wildcard record yourself —
   `*.apps.example.com  A  <your VPS IP>`.
 
@@ -187,8 +189,10 @@ Open an app (**Applications → name**) for its full control surface:
   on the next deploy. (`PATCH /api/apps/{id}`)
 - **Environment & secrets** — add, edit, or remove env vars. Each var is 🔒
   **secret** (masked, the safe default) or 🔓 **plain** (shown) — toggle per
-  variable, or "Reveal secrets" to peek. Attached database connection strings
-  are always secret. Variables are injected into the container on deploy.
+  variable, or "Reveal secrets" to peek. **Bulk import from .env** — paste a
+  block or drop a `.env` file (comments/blanks ignored, `export` and quotes
+  handled). Attached database connection strings are always secret. Variables
+  are injected into the container on deploy.
 - **Status badge** — a live running/stopped indicator (on the app header and
   the Apps list) derived from the agent's container list. Works for both
   Dockerfile (`<name>`) and Compose (`<name>-<service>-N`) apps.
