@@ -12,6 +12,9 @@ services:
     environment:
       ANCHOR_ADMIN_USER: ${ANCHOR_ADMIN_USER:-admin}
       ANCHOR_ADMIN_PASS: ${ANCHOR_ADMIN_PASS:-changeme}
+      # encrypts GitHub keys/secrets at rest; if empty, a key file is generated
+      # in the data volume (set this to keep the key outside the volume)
+      ANCHOR_SECRET_KEY: ${ANCHOR_SECRET_KEY:-}
       # auto-register the co-located agent (see the `agent` service)
       ANCHOR_BOOTSTRAP_AGENT_TOKEN: ${ANCHOR_LOCAL_AGENT_TOKEN:-}
       ANCHOR_BOOTSTRAP_SERVER_NAME: ${ANCHOR_LOCAL_SERVER_NAME:-this-vps}

@@ -206,14 +206,24 @@ the VPS and it's live.
 > For `docker-compose` apps, attach the public-facing service to the external
 > `anchor_net` network (and name it to match the app) so Caddy can reach it.
 
-## Security notes (MVP → harden before public exposure)
+## Security
 
-- Admin password is hashed with SHA-256 — **swap for bcrypt/argon2**.
-- Sessions are in-memory; agent tokens are bearer strings in the store.
-- GitHub App private key + secrets are stored in plaintext in the DB —
-  **encrypt at rest** (or use a secrets manager) before exposing publicly.
+- **Admin password** is hashed with **bcrypt**. Existing sha256 installs are
+  upgraded transparently on next login. Change it in **Settings → Change admin
+  password** (or seed via `ANCHOR_ADMIN_PASS` on first run).
+- **Sessions** are persisted in the store (survive restarts/redeploys) and
+  expire after 7 days; expired ones are purged periodically.
+- **Secrets at rest** — the GitHub App private key, client secret, webhook
+  secret, and PAT are encrypted with **AES-256-GCM**. The key comes from
+  `ANCHOR_SECRET_KEY` (recommended; keep it stable and outside the data volume)
+  or an auto-generated key file in the data dir. Losing the key means
+  re-connecting GitHub.
+- Agent tokens are bearer strings in the store.
 - The Terminal runs arbitrary shell commands on the VPS as the agent user —
   it's behind admin auth, but treat access accordingly.
+
+> **Managed-database passwords** are still stored unencrypted (separate from the
+> Settings encryption above) — a follow-up if you need it.
 
 ## Roadmap
 

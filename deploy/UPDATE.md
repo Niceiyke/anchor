@@ -74,9 +74,17 @@ docker compose --profile agent up -d
 
 ## Rotate the admin password
 
-`ANCHOR_ADMIN_*` only seed the admin on **first run**. To change it later, edit
-the value in the DB or wipe `anchor-data` and re-seed (you'd re-add servers).
-A proper "change password" flow is on the roadmap.
+In the dashboard: **Settings → Change admin password** (bcrypt-hashed).
+`ANCHOR_ADMIN_*` only seed the admin on **first run**; changing those env vars
+later has no effect.
+
+## Encryption key
+
+GitHub secrets are encrypted at rest. The key comes from `ANCHOR_SECRET_KEY`
+(set it in `.env` — generate with `openssl rand -hex 32`) or, if unset, an
+auto-generated `anchor.key` file inside the `anchor-data` volume. **Back up the
+key** (or set `ANCHOR_SECRET_KEY`) — losing it means re-connecting GitHub. Keep
+it stable across updates.
 
 ## Common checks
 

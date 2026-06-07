@@ -4,11 +4,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +25,31 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// loadSecretKey returns the 32-byte AES key used to encrypt secrets at rest.
+// Preference: ANCHOR_SECRET_KEY env (any string, hashed to 32 bytes). Otherwise
+// a key file next to the DB is used (created on first run). Keep this key safe
+// and stable — losing it means re-connecting GitHub.
+func loadSecretKey(dbPath string) []byte {
+	if v := os.Getenv("ANCHOR_SECRET_KEY"); v != "" {
+		sum := sha256.Sum256([]byte(v))
+		return sum[:]
+	}
+	keyPath := filepath.Join(filepath.Dir(dbPath), "anchor.key")
+	if b, err := os.ReadFile(keyPath); err == nil && len(b) == 32 {
+		return b
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		log.Fatalf("generate secret key: %v", err)
+	}
+	if err := os.WriteFile(keyPath, key, 0o600); err != nil {
+		log.Printf("warning: could not persist secret key to %s: %v", keyPath, err)
+	} else {
+		log.Printf("generated encryption key at %s (set ANCHOR_SECRET_KEY to manage it yourself)", keyPath)
+	}
+	return key
 }
 
 // openStore picks the backend by file extension: .json -> JSON file store,
@@ -47,6 +75,12 @@ func main() {
 	st, err := openStore(dbPath)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
+	}
+
+	// Encrypt sensitive settings (GitHub keys/secrets) at rest.
+	st, err = store.NewEncrypted(st, loadSecretKey(dbPath))
+	if err != nil {
+		log.Fatalf("init encryption: %v", err)
 	}
 
 	srv, err := control.New(st, adminUser, adminPass)

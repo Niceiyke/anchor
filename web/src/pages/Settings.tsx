@@ -50,6 +50,17 @@ export function Settings() {
     },
   });
 
+  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const [pwMsg, setPwMsg] = useState("");
+  const changePw = useMutation({
+    mutationFn: () => api.post("/api/account/password", { current_password: pw.current, new_password: pw.next }),
+    onSuccess: () => {
+      setPw({ current: "", next: "", confirm: "" });
+      setPwMsg("Password updated.");
+    },
+    onError: (e) => setPwMsg((e as Error).message),
+  });
+
   return (
     <>
       <h2>Settings</h2>
@@ -100,6 +111,27 @@ export function Settings() {
         </p>
         <pre className="logs" style={{ height: "auto" }}>{`${window.location.origin}/webhooks/github`}</pre>
         <div className="muted">Webhook secret: {data?.webhook_secret_set ? "set" : "auto-generated on first run"}</div>
+      </div>
+
+      <div className="card">
+        <strong>Change admin password</strong>
+        <p className="muted">Signed in as <b>{data?.admin_user}</b>. Min 8 characters.</p>
+        <label>Current password</label>
+        <input type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+        <label>New password</label>
+        <input type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
+        <label>Confirm new password</label>
+        <input type="password" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
+        <button
+          className="btn"
+          style={{ marginTop: 12 }}
+          disabled={!pw.current || pw.next.length < 8 || pw.next !== pw.confirm || changePw.isPending}
+          onClick={() => { setPwMsg(""); changePw.mutate(); }}
+        >
+          {changePw.isPending ? "Updating…" : "Update password"}
+        </button>
+        {pw.next && pw.confirm && pw.next !== pw.confirm && <div className="error">Passwords don't match.</div>}
+        {pwMsg && <div className={changePw.isError ? "error" : "muted"} style={changePw.isSuccess ? { color: "var(--green)" } : undefined}>{pwMsg}</div>}
       </div>
     </>
   );

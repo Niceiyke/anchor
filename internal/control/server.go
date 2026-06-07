@@ -28,7 +28,7 @@ func New(st store.Store, adminUser, adminPass string) (*Server, error) {
 	s := &Server{
 		store:   st,
 		hub:     NewHub(),
-		auth:    newAuth(),
+		auth:    newAuth(st),
 		live:    newBroadcaster(),
 		mux:     http.NewServeMux(),
 		pending: map[string]chan protocol.Event{},
@@ -47,8 +47,21 @@ func New(st store.Store, adminUser, adminPass string) (*Server, error) {
 		log.Printf("initialized admin user %q", adminUser)
 	}
 
+	// purge expired sessions in the background
+	go s.sessionJanitor()
+
 	s.routes()
 	return s, nil
+}
+
+// sessionJanitor periodically deletes expired sessions from the store.
+func (s *Server) sessionJanitor() {
+	_ = s.store.DeleteExpiredSessions(time.Now())
+	t := time.NewTicker(6 * time.Hour)
+	defer t.Stop()
+	for range t.C {
+		_ = s.store.DeleteExpiredSessions(time.Now())
+	}
 }
 
 func (s *Server) Handler() http.Handler { return s.mux }
@@ -88,6 +101,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/logout", s.requireAuth(s.handleLogout))
 	s.mux.HandleFunc("GET /api/me", s.requireAuth(s.handleMe))
+	s.mux.HandleFunc("POST /api/account/password", s.requireAuth(s.handleChangePassword))
 
 	// --- Servers ---
 	s.mux.HandleFunc("GET /api/servers", s.requireAuth(s.handleListServers))

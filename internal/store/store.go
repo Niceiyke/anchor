@@ -149,6 +149,12 @@ type Store interface {
 	CreateDatabase(Database) error
 	UpdateDatabase(Database) error
 	DeleteDatabase(id string) error
+
+	// Sessions (persistent admin login sessions).
+	CreateSession(token string, expiresAt time.Time) error
+	GetSession(token string) (time.Time, error)
+	DeleteSession(token string) error
+	DeleteExpiredSessions(now time.Time) error
 }
 
 // ---- JSON file implementation ---------------------------------------------
@@ -159,6 +165,7 @@ type data struct {
 	Apps        map[string]App        `json:"apps"`
 	Deployments map[string]Deployment `json:"deployments"`
 	Databases   map[string]Database   `json:"databases"`
+	Sessions    map[string]time.Time  `json:"sessions"`
 }
 
 type jsonStore struct {
@@ -174,6 +181,7 @@ func Open(path string) (Store, error) {
 		Apps:        map[string]App{},
 		Deployments: map[string]Deployment{},
 		Databases:   map[string]Database{},
+		Sessions:    map[string]time.Time{},
 	}}
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -191,6 +199,9 @@ func Open(path string) (Store, error) {
 		}
 		if s.d.Databases == nil {
 			s.d.Databases = map[string]Database{}
+		}
+		if s.d.Sessions == nil {
+			s.d.Sessions = map[string]time.Time{}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -420,4 +431,44 @@ func (s *jsonStore) DeleteDatabase(id string) error {
 	defer s.mu.Unlock()
 	delete(s.d.Databases, id)
 	return s.flush()
+}
+
+func (s *jsonStore) CreateSession(token string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Sessions[token] = expiresAt
+	return s.flush()
+}
+
+func (s *jsonStore) GetSession(token string) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	exp, ok := s.d.Sessions[token]
+	if !ok {
+		return time.Time{}, ErrNotFound
+	}
+	return exp, nil
+}
+
+func (s *jsonStore) DeleteSession(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.d.Sessions, token)
+	return s.flush()
+}
+
+func (s *jsonStore) DeleteExpiredSessions(now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for tok, exp := range s.d.Sessions {
+		if now.After(exp) {
+			delete(s.d.Sessions, tok)
+			changed = true
+		}
+	}
+	if changed {
+		return s.flush()
+	}
+	return nil
 }

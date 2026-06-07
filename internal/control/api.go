@@ -35,6 +35,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	// Transparently upgrade a legacy sha256 hash to bcrypt on successful login.
+	if isLegacyHash(settings.AdminPass) {
+		settings.AdminPass = hashPass(body.Password)
+		_ = s.store.SaveSettings(settings)
+	}
 	tok := s.auth.issue()
 	http.SetCookie(w, &http.Cookie{
 		Name: "anchor_session", Value: tok, Path: "/",
@@ -53,6 +58,34 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	settings, _ := s.store.Settings()
 	writeJSON(w, http.StatusOK, map[string]string{"username": settings.AdminUser})
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if len(body.NewPassword) < 8 {
+		http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	settings, _ := s.store.Settings()
+	if !checkPass(body.CurrentPassword, settings.AdminPass) {
+		http.Error(w, "current password is incorrect", http.StatusUnauthorized)
+		return
+	}
+	settings.AdminPass = hashPass(body.NewPassword)
+	if err := s.store.SaveSettings(settings); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Invalidate all other sessions; keep the caller logged in by re-issuing.
+	_ = s.store.DeleteExpiredSessions(time.Now())
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- Servers ----

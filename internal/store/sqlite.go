@@ -97,6 +97,10 @@ CREATE TABLE IF NOT EXISTS databases (
 	conn_uri   TEXT,
 	created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sessions (
+	token      TEXT PRIMARY KEY,
+	expires_at TEXT NOT NULL
+);
 `)
 	return err
 }
@@ -465,6 +469,36 @@ func (s *sqliteStore) UpdateDatabase(v Database) error {
 
 func (s *sqliteStore) DeleteDatabase(id string) error {
 	_, err := s.db.Exec(`DELETE FROM databases WHERE id = ?`, id)
+	return err
+}
+
+// ---- Sessions ----
+
+func (s *sqliteStore) CreateSession(token string, expiresAt time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO sessions (token, expires_at) VALUES (?, ?)
+		ON CONFLICT(token) DO UPDATE SET expires_at = excluded.expires_at`, token, tsFmt(expiresAt))
+	return err
+}
+
+func (s *sqliteStore) GetSession(token string) (time.Time, error) {
+	var exp string
+	err := s.db.QueryRow(`SELECT expires_at FROM sessions WHERE token = ?`, token).Scan(&exp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return tsParse(exp), nil
+}
+
+func (s *sqliteStore) DeleteSession(token string) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
+	return err
+}
+
+func (s *sqliteStore) DeleteExpiredSessions(now time.Time) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, tsFmt(now))
 	return err
 }
 
