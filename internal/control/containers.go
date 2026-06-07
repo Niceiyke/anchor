@@ -118,6 +118,30 @@ func (s *Server) handlePruneImages(w http.ResponseWriter, r *http.Request) {
 	s.awaitPruneResult(w, r, ch, "prune failed")
 }
 
+// handleSystemPrune runs docker system prune on the server's agent (containers,
+// networks, dangling images, build cache — never volumes) and returns the
+// reclaimed-space summary.
+func (s *Server) handleSystemPrune(w http.ResponseWriter, r *http.Request) {
+	serverID := r.PathValue("id")
+	if _, err := s.store.GetServer(serverID); err != nil {
+		http.Error(w, "server not found", http.StatusNotFound)
+		return
+	}
+
+	reqID := "sp_" + randToken()[:12]
+	ch, cancel := s.awaitReply(reqID)
+	defer cancel()
+
+	payload, _ := json.Marshal(protocol.SystemPruneRequest{RequestID: reqID})
+	cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdSystemPrune, Data: payload}
+	if !s.hub.Send(serverID, cmd) {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+
+	s.awaitPruneResult(w, r, ch, "prune failed")
+}
+
 // awaitPruneResult blocks on a prune reply and writes the docker summary, or an
 // error/timeout. Shared by the container and image prune handlers.
 func (s *Server) awaitPruneResult(w http.ResponseWriter, r *http.Request, ch <-chan protocol.Event, failMsg string) {

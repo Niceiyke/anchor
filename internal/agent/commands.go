@@ -192,6 +192,23 @@ func (a *Agent) pruneImages(ctx context.Context, req protocol.PruneImagesRequest
 	})
 }
 
+// systemPrune reclaims space across containers, networks, dangling images and
+// build cache. Volumes are deliberately NOT pruned (they hold database data).
+func (a *Agent) systemPrune(ctx context.Context, req protocol.SystemPruneRequest) {
+	out, err := exec.CommandContext(ctx, "docker", "system", "prune", "-f").CombinedOutput()
+	exit := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exit = ee.ExitCode()
+		} else {
+			exit = -1
+		}
+	}
+	a.emit(protocol.EvtCommandResult, protocol.CommandResult{
+		RequestID: req.RequestID, ExitCode: exit, Output: strings.TrimSpace(string(out)),
+	})
+}
+
 // stopApp stops and removes an app's container(s).
 func (a *Agent) stopApp(ctx context.Context, req protocol.StopAppRequest) {
 	name := sanitize(req.AppName)
