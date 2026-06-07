@@ -187,18 +187,10 @@ func writeEnvFile(dir string, env map[string]string) error {
 	return os.WriteFile(filepath.Join(dir, ".env"), []byte(b.String()), 0o600)
 }
 
-// sanitize makes a string safe for use as a docker name/project.
+// sanitize makes a string safe for use as a docker name/project. It delegates
+// to protocol.Sanitize so the control plane derives the same container name.
 func sanitize(s string) string {
-	s = strings.ToLower(s)
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('-')
-		}
-	}
-	return strings.Trim(b.String(), "-_")
+	return protocol.Sanitize(s)
 }
 
 // run executes a command, streaming combined output as log events.

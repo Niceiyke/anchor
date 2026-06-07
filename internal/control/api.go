@@ -204,6 +204,9 @@ func (s *Server) mustListApps() []store.App {
 
 func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 	apps, _ := s.store.ListApps()
+	for i := range apps {
+		apps[i].ContainerName = protocol.Sanitize(apps[i].Name)
+	}
 	writeJSON(w, http.StatusOK, apps)
 }
 
@@ -246,6 +249,7 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusOK, a)
 }
 

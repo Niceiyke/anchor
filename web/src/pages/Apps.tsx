@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type App, type Server, type Repo } from "../api";
+import { RunningBadge } from "../components/RunningBadge";
 
 export function Apps() {
   const qc = useQueryClient();
@@ -133,11 +134,14 @@ export function Apps() {
       </div>
 
       <table className="card" style={{ display: "table" }}>
-        <thead><tr><th>Name</th><th>Repo</th><th>Branch</th><th>Domain</th><th>Auto</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Status</th><th>Repo</th><th>Branch</th><th>Domain</th><th>Auto</th><th></th></tr></thead>
         <tbody>
-          {apps.map((a) => (
+          {apps.map((a) => {
+            const online = servers.find((s) => s.id === a.server_id)?.online ?? false;
+            return (
             <tr key={a.id}>
               <td><Link to="/apps/$appId" params={{ appId: a.id }}>{a.name}</Link></td>
+              <td><RunningBadge serverId={a.server_id} containerName={a.container_name} online={online} /></td>
               <td className="muted">{a.repo_full_name || a.repo_url}</td>
               <td>{a.branch}</td>
               <td className="muted">{a.domain ? <a href={`https://${a.domain}`} target="_blank" rel="noreferrer">{a.domain} ↗</a> : "—"}</td>
@@ -153,8 +157,9 @@ export function Apps() {
                 </button>
               </td>
             </tr>
-          ))}
-          {apps.length === 0 && <tr><td colSpan={6} className="muted">No apps yet.</td></tr>}
+          );
+          })}
+          {apps.length === 0 && <tr><td colSpan={7} className="muted">No apps yet.</td></tr>}
         </tbody>
       </table>
     </>
