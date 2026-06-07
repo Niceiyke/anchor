@@ -3,6 +3,7 @@ package control
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +97,16 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		username = settings.AdminUser
 		role = "admin"
 	}
+	// Self-heal sessions established before CSRF was introduced: if the session
+	// is valid but the double-submit cookie is missing, issue one so mutating
+	// requests work without forcing a re-login.
+	if _, err := r.Cookie("anchor_csrf"); err != nil {
+		http.SetCookie(w, &http.Cookie{
+			Name: "anchor_csrf", Value: s.auth.csrfToken(), Path: "/",
+			SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+			Expires: time.Now().Add(7 * 24 * time.Hour),
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"username": username, "role": role})
 }
 
@@ -122,8 +133,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Invalidate all other sessions; keep the caller logged in by re-issuing.
-	_ = s.store.DeleteExpiredSessions(time.Now())
+	// Revoke the admin's other sessions (log out other devices); keep the
+	// caller logged in via their current token.
+	_ = s.store.DeleteSessionsForUser(settings.AdminUser, bearer(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -308,21 +320,21 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, _ := s.store.Settings()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"admin_user":            settings.AdminUser,
-		"github_token_set":      settings.GitHubToken != "",
-		"webhook_secret_set":    settings.WebhookSecret != "",
-		"github_app_configured": settings.GitHubAppConfigured(),
-		"github_app_installed":  settings.GitHubInstallationID != 0,
-		"github_app_slug":       settings.GitHubAppSlug,
+		"admin_user":               settings.AdminUser,
+		"github_token_set":         settings.GitHubToken != "",
+		"webhook_secret_set":       settings.WebhookSecret != "",
+		"github_app_configured":    settings.GitHubAppConfigured(),
+		"github_app_installed":     settings.GitHubInstallationID != 0,
+		"github_app_slug":          settings.GitHubAppSlug,
 		"notification_webhook_set": settings.NotificationWebhook != "",
 	})
 }
 
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		GitHubToken          *string `json:"github_token"`
-		WebhookSecret        *string `json:"webhook_secret"`
-		NotificationWebhook  *string `json:"notification_webhook"`
+		GitHubToken         *string `json:"github_token"`
+		WebhookSecret       *string `json:"webhook_secret"`
+		NotificationWebhook *string `json:"notification_webhook"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -357,7 +369,9 @@ func (s *Server) handleServerStats(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := 200
 	if q := r.URL.Query().Get("limit"); q != "" {
-		// ignore parse errors, use default
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 5000 {
+			limit = n
+		}
 	}
 	stats, _ := s.store.ServerStats(serverID, since, limit)
 	writeJSON(w, http.StatusOK, stats)

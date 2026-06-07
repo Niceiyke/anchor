@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -182,6 +183,10 @@ type Store interface {
 	GetSession(token string) (time.Time, error)
 	DeleteSession(token string) error
 	DeleteExpiredSessions(now time.Time) error
+	// DeleteSessionsForUser revokes every session belonging to username except
+	// exceptToken (the caller's own). Used to log out other devices on a
+	// password change. Session tokens are formatted "username:role:random".
+	DeleteSessionsForUser(username, exceptToken string) error
 
 	// Server stats (time series).
 	InsertServerStat(ServerStat) error
@@ -198,12 +203,14 @@ type Store interface {
 // ---- JSON file implementation ---------------------------------------------
 
 type data struct {
-	Settings    Settings              `json:"settings"`
-	Servers     map[string]Server     `json:"servers"`
-	Apps        map[string]App        `json:"apps"`
-	Deployments map[string]Deployment `json:"deployments"`
-	Databases   map[string]Database   `json:"databases"`
-	Sessions    map[string]time.Time  `json:"sessions"`
+	Settings    Settings                `json:"settings"`
+	Servers     map[string]Server       `json:"servers"`
+	Apps        map[string]App          `json:"apps"`
+	Deployments map[string]Deployment   `json:"deployments"`
+	Databases   map[string]Database     `json:"databases"`
+	Sessions    map[string]time.Time    `json:"sessions"`
+	Users       map[string]User         `json:"users"`
+	ServerStats map[string][]ServerStat `json:"server_stats"`
 }
 
 type jsonStore struct {
@@ -220,6 +227,8 @@ func Open(path string) (Store, error) {
 		Deployments: map[string]Deployment{},
 		Databases:   map[string]Database{},
 		Sessions:    map[string]time.Time{},
+		Users:       map[string]User{},
+		ServerStats: map[string][]ServerStat{},
 	}}
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -240,6 +249,12 @@ func Open(path string) (Store, error) {
 		}
 		if s.d.Sessions == nil {
 			s.d.Sessions = map[string]time.Time{}
+		}
+		if s.d.Users == nil {
+			s.d.Users = map[string]User{}
+		}
+		if s.d.ServerStats == nil {
+			s.d.ServerStats = map[string][]ServerStat{}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -526,10 +541,101 @@ func (s *jsonStore) DeleteExpiredSessions(now time.Time) error {
 	return nil
 }
 
-func (s *jsonStore) InsertServerStat(ServerStat) error       { return nil }
-func (s *jsonStore) ServerStats(string, time.Time, int) ([]ServerStat, error) { return nil, nil }
-func (s *jsonStore) ListUsers() ([]User, error)               { return nil, nil }
-func (s *jsonStore) GetUser(string) (User, error)             { return User{}, ErrNotFound }
-func (s *jsonStore) GetUserByUsername(string) (User, error)   { return User{}, ErrNotFound }
-func (s *jsonStore) CreateUser(User) error                    { return nil }
-func (s *jsonStore) DeleteUser(string) error                  { return nil }
+func (s *jsonStore) DeleteSessionsForUser(username, exceptToken string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prefix := username + ":"
+	changed := false
+	for tok := range s.d.Sessions {
+		if tok != exceptToken && strings.HasPrefix(tok, prefix) {
+			delete(s.d.Sessions, tok)
+			changed = true
+		}
+	}
+	if changed {
+		return s.flush()
+	}
+	return nil
+}
+
+// jsonMaxStatsPerServer caps the retained time-series points per server so the
+// JSON file doesn't grow without bound.
+const jsonMaxStatsPerServer = 500
+
+func (s *jsonStore) InsertServerStat(st ServerStat) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pts := append(s.d.ServerStats[st.ServerID], st)
+	if len(pts) > jsonMaxStatsPerServer {
+		pts = pts[len(pts)-jsonMaxStatsPerServer:]
+	}
+	s.d.ServerStats[st.ServerID] = pts
+	return s.flush()
+}
+
+func (s *jsonStore) ServerStats(serverID string, since time.Time, limit int) ([]ServerStat, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 200
+	}
+	all := s.d.ServerStats[serverID]
+	out := []ServerStat{}
+	// Walk newest-first so the most recent `limit` points are returned.
+	for i := len(all) - 1; i >= 0 && len(out) < limit; i-- {
+		if all[i].At.Before(since) {
+			continue
+		}
+		out = append(out, all[i])
+	}
+	return out, nil
+}
+
+func (s *jsonStore) ListUsers() ([]User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []User{}
+	for _, u := range s.d.Users {
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func (s *jsonStore) GetUser(id string) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if u, ok := s.d.Users[id]; ok {
+		return u, nil
+	}
+	return User{}, ErrNotFound
+}
+
+func (s *jsonStore) GetUserByUsername(username string) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.d.Users {
+		if u.Username == username {
+			return u, nil
+		}
+	}
+	return User{}, ErrNotFound
+}
+
+func (s *jsonStore) CreateUser(v User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.d.Users {
+		if u.Username == v.Username {
+			return errors.New("username already exists")
+		}
+	}
+	s.d.Users[v.ID] = v
+	return s.flush()
+}
+
+func (s *jsonStore) DeleteUser(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.d.Users, id)
+	return s.flush()
+}

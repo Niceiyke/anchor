@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
@@ -546,6 +547,15 @@ func (s *sqliteStore) DeleteSession(token string) error {
 
 func (s *sqliteStore) DeleteExpiredSessions(now time.Time) error {
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, tsFmt(now))
+	return err
+}
+
+func (s *sqliteStore) DeleteSessionsForUser(username, exceptToken string) error {
+	// Tokens are "username:role:random"; match on the "username:" prefix. Escape
+	// LIKE metacharacters in the username so it can't act as a wildcard.
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(username)
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token LIKE ? ESCAPE '\' AND token <> ?`,
+		esc+":%", exceptToken)
 	return err
 }
 

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/oyomworld/anchor/pkg/protocol"
 )
@@ -42,16 +41,9 @@ func (a *Agent) runDeploy(ctx context.Context, req protocol.DeployRequest) {
 			return
 		}
 	case stackDockerfile:
-		if req.ZeroDowntime && req.Domain != "" {
-			if err := a.deployDockerfileZD(ctx, req, appDir); err != nil {
-				a.fail(depID, "zero-downtime deploy failed", err)
-				return
-			}
-		} else {
-			if err := a.deployDockerfile(ctx, req, appDir); err != nil {
-				a.fail(depID, "dockerfile deploy failed", err)
-				return
-			}
+		if err := a.deployDockerfile(ctx, req, appDir); err != nil {
+			a.fail(depID, "dockerfile deploy failed", err)
+			return
 		}
 	}
 
@@ -167,49 +159,6 @@ func (a *Agent) deployDockerfile(ctx context.Context, req protocol.DeployRequest
 }
 
 const anchorNetwork = "anchor_net"
-
-// deployDockerfileZD does a zero-downtime deploy for Dockerfile apps: build new
-// image, start new container alongside old one, health check, swap Caddy, then
-// clean up old container.
-func (a *Agent) deployDockerfileZD(ctx context.Context, req protocol.DeployRequest, appDir string) error {
-	name := sanitize(req.AppName)
-	imageNew := "anchor/" + name + ":next"
-
-	if err := a.run(ctx, req.DeploymentID, appDir, "docker", "build", "-t", imageNew, "."); err != nil {
-		return err
-	}
-
-	a.emitStatus(req.DeploymentID, protocol.PhaseStarting, "Starting new container (zero-downtime)", string(stackDockerfile))
-	_ = a.run(ctx, req.DeploymentID, "", "docker", "rm", "-f", name+"-next")
-
-	args := []string{"run", "-d", "--name", name + "-next", "--restart", "unless-stopped",
-		"--label", "anchor.app=" + name, "--network", anchorNetwork}
-	for k, v := range req.EnvVars {
-		args = append(args, "-e", k+"="+v)
-	}
-	args = append(args, imageNew)
-
-	_ = a.run(ctx, req.DeploymentID, "", "docker", "network", "create", anchorNetwork)
-	if err := a.run(ctx, req.DeploymentID, appDir, "docker", args...); err != nil {
-		return err
-	}
-
-	// Brief health check on the new container.
-	a.emitLog(req.DeploymentID, "", "system", "Waiting for new container to stabilize...")
-	time.Sleep(3 * time.Second)
-	a.checkHealth(ctx, req)
-
-	// Swap Caddy to the new container, then remove old.
-	a.emitStatus(req.DeploymentID, protocol.PhaseConfiguring, "Swapping traffic to new instance", string(stackDockerfile))
-	if req.Domain != "" {
-		a.configureCaddy(ctx, req)
-	}
-	_ = a.run(ctx, req.DeploymentID, "", "docker", "rm", "-f", name)
-	_ = a.run(ctx, req.DeploymentID, "", "docker", "rename", name+"-next", name)
-
-	a.emitLog(req.DeploymentID, "", "system", "Zero-downtime swap complete")
-	return nil
-}
 
 // writeEnvFile renders a .env file consumed by docker compose.
 func writeEnvFile(dir string, env map[string]string) error {

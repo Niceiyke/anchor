@@ -7,7 +7,7 @@ export class ApiError extends Error {
   }
 }
 
-function csrfToken(): string | null {
+export function csrfToken(): string | null {
   const m = document.cookie.match(/(?:^|;\s*)anchor_csrf=([^;]*)/);
   return m ? m[1] : null;
 }

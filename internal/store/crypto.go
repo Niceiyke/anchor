@@ -3,7 +3,9 @@ package store
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"strings"
 )
@@ -17,7 +19,8 @@ const encPrefix = "enc:v1:"
 // Database passwords.
 type cryptoStore struct {
 	Store
-	gcm cipher.AEAD
+	gcm    cipher.AEAD
+	detKey []byte // HMAC key for deterministic encryption (token lookups)
 }
 
 // NewEncrypted wraps inner so secret fields are encrypted at rest.
@@ -31,7 +34,10 @@ func NewEncrypted(inner Store, key []byte) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &cryptoStore{Store: inner, gcm: gcm}, nil
+	// Derive a separate key for deterministic-nonce encryption so we never
+	// reuse the AES key's randomized-nonce domain for the deterministic one.
+	dk := sha256.Sum256(append([]byte("anchor-det-nonce:"), key...))
+	return &cryptoStore{Store: inner, gcm: gcm, detKey: dk[:]}, nil
 }
 
 func (c *cryptoStore) enc(s string) string {
@@ -40,6 +46,22 @@ func (c *cryptoStore) enc(s string) string {
 	}
 	nonce := make([]byte, c.gcm.NonceSize())
 	_, _ = rand.Read(nonce)
+	ct := c.gcm.Seal(nonce, nonce, []byte(s), nil)
+	return encPrefix + base64.StdEncoding.EncodeToString(ct)
+}
+
+// encDet encrypts deterministically: the same plaintext always yields the same
+// ciphertext, so the result can be stored and later matched by exact lookup
+// (used for agent tokens, which the agent presents in plaintext to authenticate).
+// The nonce is derived from the plaintext via HMAC, which is safe because nonce
+// reuse under AES-GCM is only dangerous across *different* plaintexts.
+func (c *cryptoStore) encDet(s string) string {
+	if s == "" || strings.HasPrefix(s, encPrefix) {
+		return s
+	}
+	mac := hmac.New(sha256.New, c.detKey)
+	mac.Write([]byte(s))
+	nonce := mac.Sum(nil)[:c.gcm.NonceSize()]
 	ct := c.gcm.Seal(nonce, nonce, []byte(s), nil)
 	return encPrefix + base64.StdEncoding.EncodeToString(ct)
 }
@@ -103,27 +125,30 @@ func (c *cryptoStore) GetServer(id string) (Server, error) {
 }
 
 func (c *cryptoStore) GetServerByToken(token string) (Server, error) {
-	// The underlying store does a plaintext comparison. We try the plain token
-	// first (legacy), then the encrypted form.
+	// Tokens are encrypted deterministically, so the stored ciphertext for a
+	// given plaintext is stable and can be matched directly. Try the legacy
+	// plaintext form first (for rows written before encryption), then the
+	// deterministic ciphertext.
 	v, err := c.Store.GetServerByToken(token)
 	if err == nil {
 		v.AgentToken = c.dec(v.AgentToken)
 		return v, nil
 	}
-	v, err = c.Store.GetServerByToken(c.enc(token))
+	v, err = c.Store.GetServerByToken(c.encDet(token))
 	v.AgentToken = c.dec(v.AgentToken)
 	return v, err
 }
 
 func (c *cryptoStore) CreateServer(v Server) error {
-	v.AgentToken = c.enc(v.AgentToken)
+	v.AgentToken = c.encDet(v.AgentToken)
 	return c.Store.CreateServer(v)
 }
 
 func (c *cryptoStore) UpdateServer(v Server) error {
 	// The caller may have read the decrypted token; re-encrypt before persisting
-	// unless it's already encrypted (no-op if already has prefix).
-	v.AgentToken = c.enc(v.AgentToken)
+	// (no-op if already an enc: ciphertext). Deterministic so token lookups
+	// keep matching.
+	v.AgentToken = c.encDet(v.AgentToken)
 	return c.Store.UpdateServer(v)
 }
 

@@ -151,7 +151,7 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 		dep.UpdatedAt = time.Now()
 		_ = s.store.UpdateDeployment(dep)
 		s.broadcast(deploymentTopic(ds.DeploymentID), evt)
-		s.notifyDeployStatus(dep.AppID, dep, ds)
+		go s.notifyDeployStatus(dep.AppID, dep, ds)
 		if ds.Phase == protocol.PhaseSuccess && dep.CommitSHA != "" {
 			if app, err := s.store.GetApp(dep.AppID); err == nil {
 				app.LastGoodSHA = dep.CommitSHA

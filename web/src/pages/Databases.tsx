@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Database, type Server } from "../api";
+import { api, csrfToken, type Database, type Server } from "../api";
 
 const ENGINES = [
   { id: "postgres", label: "PostgreSQL", icon: "🐘" },
@@ -96,7 +96,12 @@ function DatabaseCard({ db, onDelete }: { db: Database; onDelete: () => void }) 
     if (!confirm(`Backup "${db.name}"? The dump file will be downloaded.`)) return;
     setBackingUp(true);
     try {
-      const res = await fetch(`/api/databases/${db.id}/backup`, { method: "POST", credentials: "include" });
+      const csrf = csrfToken();
+      const res = await fetch(`/api/databases/${db.id}/backup`, {
+        method: "POST",
+        credentials: "include",
+        headers: csrf ? { "X-CSRF-Token": csrf } : undefined,
+      });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

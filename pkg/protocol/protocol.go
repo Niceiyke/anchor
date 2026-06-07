@@ -51,7 +51,6 @@ type DeployRequest struct {
 	Domain        string            `json:"domain"`    // public domain for Caddy routing
 	ContainerPort int               `json:"container_port"`
 	EnvVars       map[string]string `json:"env_vars"`
-	ZeroDowntime  bool              `json:"zero_downtime"`
 }
 
 // RunCommandRequest is the payload for CmdRunCommand.

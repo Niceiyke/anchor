@@ -120,6 +120,9 @@ func (s *Server) routes() {
 	authCSRF := func(f http.HandlerFunc) http.HandlerFunc {
 		return auth(s.requireCSRF(f))
 	}
+	adminCSRF := func(f http.HandlerFunc) http.HandlerFunc {
+		return s.requireAdmin(s.requireCSRF(f))
+	}
 
 	// --- Agent-facing (agent bearer token) ---
 	s.mux.HandleFunc("GET /agent/v1/stream", s.handleAgentStream)
@@ -177,10 +180,10 @@ func (s *Server) routes() {
 	// --- Server stats ---
 	s.mux.HandleFunc("GET /api/servers/{id}/stats", auth(s.handleServerStats))
 
-	// --- Users (admin only, viewer can't manage users) ---
-	s.mux.HandleFunc("GET /api/users", authCSRF(s.handleListUsers))
-	s.mux.HandleFunc("POST /api/users", authCSRF(s.handleCreateUser))
-	s.mux.HandleFunc("DELETE /api/users/{id}", authCSRF(s.handleDeleteUser))
+	// --- Users (admin only — including listing) ---
+	s.mux.HandleFunc("GET /api/users", adminCSRF(s.handleListUsers))
+	s.mux.HandleFunc("POST /api/users", adminCSRF(s.handleCreateUser))
+	s.mux.HandleFunc("DELETE /api/users/{id}", adminCSRF(s.handleDeleteUser))
 
 	// --- Live (browser SSE) ---
 	s.mux.HandleFunc("GET /api/events", auth(s.handleEventStream))
@@ -209,6 +212,28 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if role == "viewer" && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			http.Error(w, "viewer role cannot perform write operations", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// requireAdmin wraps a handler so only authenticated admins may reach it
+// (used for user management, including listing). Legacy bootstrap sessions
+// without a role prefix are treated as admin.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tok := bearer(r)
+		if !s.auth.valid(tok) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		role := roleFromToken(tok)
+		if role == "" {
+			role = "admin" // legacy bootstrap session
+		}
+		if role != "admin" {
+			http.Error(w, "admin role required", http.StatusForbidden)
 			return
 		}
 		next(w, r)
