@@ -271,17 +271,16 @@ the VPS and it's live.
   password** (or seed via `ANCHOR_ADMIN_PASS` on first run).
 - **Sessions** are persisted in the store (survive restarts/redeploys) and
   expire after 7 days; expired ones are purged periodically.
-- **Secrets at rest** — the GitHub App private key, client secret, webhook
-  secret, and PAT are encrypted with **AES-256-GCM**. The key comes from
+- **Secrets at rest** — encrypted with **AES-256-GCM**: GitHub App private key,
+  client secret, webhook secret and PAT; the Cloudflare API token; agent tokens
+  (deterministic so they're still matchable on connect); managed-database
+  passwords; and **app environment variable values**. The key comes from
   `ANCHOR_SECRET_KEY` (recommended; keep it stable and outside the data volume)
-  or an auto-generated key file in the data dir. Losing the key means
-  re-connecting GitHub.
-- Agent tokens are bearer strings in the store.
+  or an auto-generated key file in the data dir. Existing plaintext values are
+  read through unchanged and encrypted on next write. Losing the key means
+  re-entering those secrets.
 - The Terminal runs arbitrary shell commands on the VPS as the agent user —
   it's behind admin auth, but treat access accordingly.
-
-> **Managed-database passwords** are still stored unencrypted (separate from the
-> Settings encryption above) — a follow-up if you need it.
 
 ## Roadmap
 

@@ -178,3 +178,53 @@ func (c *cryptoStore) UpdateDatabase(v Database) error {
 	v.Password = c.enc(v.Password)
 	return c.Store.UpdateDatabase(v)
 }
+
+// ---- Apps (env var values) ----
+//
+// EnvVars is a map (reference type), so we build a NEW map when transforming —
+// mutating in place would corrupt the JSON store's live data and leak
+// ciphertext back into API responses (the caller keeps using its map after the
+// store call). Keys are not sensitive; only values are encrypted.
+
+func (c *cryptoStore) transformEnv(m map[string]string, fn func(string) string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = fn(v)
+	}
+	return out
+}
+
+func (c *cryptoStore) ListApps() ([]App, error) {
+	apps, err := c.Store.ListApps()
+	for i := range apps {
+		apps[i].EnvVars = c.transformEnv(apps[i].EnvVars, c.dec)
+	}
+	return apps, err
+}
+
+func (c *cryptoStore) GetApp(id string) (App, error) {
+	v, err := c.Store.GetApp(id)
+	v.EnvVars = c.transformEnv(v.EnvVars, c.dec)
+	return v, err
+}
+
+func (c *cryptoStore) AppsByRepo(fullName string) ([]App, error) {
+	apps, err := c.Store.AppsByRepo(fullName)
+	for i := range apps {
+		apps[i].EnvVars = c.transformEnv(apps[i].EnvVars, c.dec)
+	}
+	return apps, err
+}
+
+func (c *cryptoStore) CreateApp(v App) error {
+	v.EnvVars = c.transformEnv(v.EnvVars, c.enc)
+	return c.Store.CreateApp(v)
+}
+
+func (c *cryptoStore) UpdateApp(v App) error {
+	v.EnvVars = c.transformEnv(v.EnvVars, c.enc)
+	return c.Store.UpdateApp(v)
+}

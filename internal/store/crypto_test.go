@@ -97,6 +97,50 @@ func TestEncryptedAgentTokenLookup(t *testing.T) {
 	}
 }
 
+func TestEncryptedAppEnvAtRest(t *testing.T) {
+	inner, _ := Open(filepath.Join(t.TempDir(), "s.json"))
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	enc, err := NewEncrypted(inner, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := App{ID: "app_1", Name: "x", ServerID: "s1", EnvVars: map[string]string{"JWT_SECRET": "super-secret", "PUBLIC": "ok"}}
+	if err := enc.CreateApp(app); err != nil {
+		t.Fatal(err)
+	}
+
+	// The caller's map must NOT have been mutated to ciphertext.
+	if app.EnvVars["JWT_SECRET"] != "super-secret" {
+		t.Fatalf("caller map was mutated: %q", app.EnvVars["JWT_SECRET"])
+	}
+
+	// At rest (inner store) the values are ciphertext, keys are plaintext.
+	raw, _ := inner.GetApp("app_1")
+	if !strings.HasPrefix(raw.EnvVars["JWT_SECRET"], encPrefix) || strings.Contains(raw.EnvVars["JWT_SECRET"], "super-secret") {
+		t.Errorf("env value not encrypted at rest: %q", raw.EnvVars["JWT_SECRET"])
+	}
+	if _, ok := raw.EnvVars["JWT_SECRET"]; !ok {
+		t.Error("env key should be preserved in plaintext")
+	}
+
+	// Through the wrapper, values decrypt back.
+	got, _ := enc.GetApp("app_1")
+	if got.EnvVars["JWT_SECRET"] != "super-secret" || got.EnvVars["PUBLIC"] != "ok" {
+		t.Errorf("decrypt env = %+v", got.EnvVars)
+	}
+
+	// Reading twice must not corrupt the at-rest data (in-place mutation guard).
+	_, _ = enc.GetApp("app_1")
+	raw2, _ := inner.GetApp("app_1")
+	if !strings.HasPrefix(raw2.EnvVars["JWT_SECRET"], encPrefix) {
+		t.Error("at-rest value became plaintext after a read (map aliasing bug)")
+	}
+}
+
 func TestEncryptedReadsLegacyPlaintext(t *testing.T) {
 	inner, _ := Open(filepath.Join(t.TempDir(), "s.json"))
 	// simulate a pre-encryption install: plaintext token in storage
