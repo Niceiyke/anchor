@@ -119,20 +119,51 @@ func main() {
 	_ = httpSrv.Shutdown(ctx)
 }
 
-// withCORS allows the Vite dev server to call the API during development.
+// withCORS restricts cross-origin requests to the configured origin.
+// The host itself (no Origin header) and the listed origins are allowed.
 func withCORS(next http.Handler) http.Handler {
+	allowed := makeOriginSet(os.Getenv("ANCHOR_CORS"))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
 		}
+		if !allowed(origin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// makeOriginSet returns a predicate that reports whether an Origin header is
+// permitted. When ANCHOR_CORS is empty or "*" it permits all origins
+// (convenient for local dev); otherwise it requires an exact match against one
+// of the comma-separated entries.
+func makeOriginSet(s string) func(string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || trimmed == "*" {
+		return func(string) bool { return true }
+	}
+	set := map[string]struct{}{}
+	for _, o := range strings.Split(trimmed, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			set[strings.TrimSuffix(o, "/")] = struct{}{}
+		}
+	}
+	return func(o string) bool {
+		o = strings.TrimSuffix(o, "/")
+		_, ok := set[o]
+		return ok
+	}
 }

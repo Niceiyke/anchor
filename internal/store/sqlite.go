@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS apps (
 	container_port INTEGER NOT NULL,
 	auto_deploy    INTEGER NOT NULL DEFAULT 0,
 	env_vars       TEXT NOT NULL DEFAULT '{}',
+	last_good_sha  TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_apps_repo ON apps(repo_full_name);
@@ -101,7 +103,31 @@ CREATE TABLE IF NOT EXISTS sessions (
 	token      TEXT PRIMARY KEY,
 	expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS server_stats (
+	id       INTEGER PRIMARY KEY AUTOINCREMENT,
+	server_id TEXT NOT NULL,
+	cpu       REAL NOT NULL,
+	mem_used  INTEGER NOT NULL,
+	mem_total INTEGER NOT NULL,
+	disk_used INTEGER NOT NULL,
+	disk_total INTEGER NOT NULL,
+	containers INTEGER NOT NULL,
+	load_1    REAL NOT NULL DEFAULT 0,
+	at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ss_srv_time ON server_stats(server_id, at);
+CREATE TABLE IF NOT EXISTS users (
+	id            TEXT PRIMARY KEY,
+	username      TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	role          TEXT NOT NULL DEFAULT 'admin',
+	created_at    TEXT NOT NULL
+);
 `)
+	// Migrate: add last_good_sha column if it doesn't exist (for pre-existing DBs).
+	if err == nil {
+		s.db.Exec(`ALTER TABLE apps ADD COLUMN last_good_sha TEXT NOT NULL DEFAULT ''`)
+	}
 	return err
 }
 
@@ -230,7 +256,7 @@ func scanApp(r scanner) (App, error) {
 	var envRaw, createdAt string
 	var auto int
 	if err := r.Scan(&v.ID, &v.Name, &v.ServerID, &v.RepoFullName, &v.RepoURL, &v.Branch,
-		&v.Domain, &v.ContainerPort, &auto, &envRaw, &createdAt); err != nil {
+		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &createdAt); err != nil {
 		return v, err
 	}
 	v.AutoDeploy = auto == 1
@@ -240,7 +266,7 @@ func scanApp(r scanner) (App, error) {
 	return v, nil
 }
 
-const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, created_at`
+const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, created_at`
 
 func (s *sqliteStore) ListApps() ([]App, error) {
 	rows, err := s.db.Query(`SELECT ` + appCols + ` FROM apps ORDER BY created_at`)
@@ -286,15 +312,15 @@ func (s *sqliteStore) AppsByRepo(fullName string) ([]App, error) {
 }
 
 func (s *sqliteStore) CreateApp(v App) error {
-	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.ID, v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain,
-		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), tsFmt(v.CreatedAt))
+		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, tsFmt(v.CreatedAt))
 	return err
 }
 
 func (s *sqliteStore) UpdateApp(v App) error {
-	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=? WHERE id=?`,
-		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.ID)
+	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=? WHERE id=?`,
+		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ID)
 	return affected(res, err)
 }
 
@@ -411,6 +437,28 @@ func (s *sqliteStore) UpdateDeployment(v Deployment) error {
 	return tx.Commit()
 }
 
+// AppendDeploymentLog inserts a single log line atomically and caps the
+// deployment at 5000 lines (oldest are trimmed).
+func (s *sqliteStore) AppendDeploymentLog(deploymentID string, line LogLine) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`INSERT INTO deployment_logs (deployment_id, stream, line, at) VALUES (?,?,?,?)`,
+		deploymentID, line.Stream, line.Line, tsFmt(line.At))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`DELETE FROM deployment_logs WHERE deployment_id = ? AND id NOT IN (
+		SELECT id FROM deployment_logs WHERE deployment_id = ? ORDER BY id DESC LIMIT 5000)`,
+		deploymentID, deploymentID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ---- Databases ----
 
 const dbCols = `id, name, server_id, engine, version, status, message, container, volume, host, port, host_port, username, password, db_name, conn_uri, created_at`
@@ -502,6 +550,15 @@ func (s *sqliteStore) DeleteExpiredSessions(now time.Time) error {
 	return err
 }
 
+func (s *sqliteStore) DeleteSessionsForUser(username, exceptToken string) error {
+	// Tokens are "username:role:random"; match on the "username:" prefix. Escape
+	// LIKE metacharacters in the username so it can't act as a wildcard.
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(username)
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token LIKE ? ESCAPE '\' AND token <> ?`,
+		esc+":%", exceptToken)
+	return err
+}
+
 // ---- small helpers ----
 
 func b2i(b bool) int {
@@ -539,4 +596,94 @@ func affected(res sql.Result, err error) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ---- Server stats (time series) ----
+
+func (s *sqliteStore) InsertServerStat(st ServerStat) error {
+	_, err := s.db.Exec(`INSERT INTO server_stats (server_id, cpu, mem_used, mem_total, disk_used, disk_total, containers, load_1, at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		st.ServerID, st.CPUPercent, st.MemUsed, st.MemTotal, st.DiskUsed, st.DiskTotal, st.Containers, st.Load1, tsFmt(st.At))
+	return err
+}
+
+func (s *sqliteStore) ServerStats(serverID string, since time.Time, limit int) ([]ServerStat, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.Query(`SELECT server_id, cpu, mem_used, mem_total, disk_used, disk_total, containers, load_1, at
+		FROM server_stats WHERE server_id = ? AND at >= ? ORDER BY at DESC LIMIT ?`, serverID, tsFmt(since), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ServerStat{}
+	for rows.Next() {
+		var st ServerStat
+		var at string
+		if err := rows.Scan(&st.ServerID, &st.CPUPercent, &st.MemUsed, &st.MemTotal, &st.DiskUsed, &st.DiskTotal, &st.Containers, &st.Load1, &at); err != nil {
+			return nil, err
+		}
+		st.At = tsParse(at)
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// ---- Users ----
+
+func scanUser(r scanner) (User, error) {
+	var v User
+	var createdAt string
+	if err := r.Scan(&v.ID, &v.Username, &v.PasswordHash, &v.Role, &createdAt); err != nil {
+		return v, err
+	}
+	v.CreatedAt = tsParse(createdAt)
+	return v, nil
+}
+
+func (s *sqliteStore) ListUsers() ([]User, error) {
+	rows, err := s.db.Query(`SELECT id, username, password_hash, role, created_at FROM users ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []User{}
+	for rows.Next() {
+		v, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) GetUser(id string) (User, error) {
+	row := s.db.QueryRow(`SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?`, id)
+	v, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return v, err
+}
+
+func (s *sqliteStore) GetUserByUsername(username string) (User, error) {
+	row := s.db.QueryRow(`SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?`, username)
+	v, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return v, err
+}
+
+func (s *sqliteStore) CreateUser(v User) error {
+	_, err := s.db.Exec(`INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?,?,?,?,?)`,
+		v.ID, v.Username, v.PasswordHash, v.Role, tsFmt(v.CreatedAt))
+	return err
+}
+
+func (s *sqliteStore) DeleteUser(id string) error {
+	_, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
+	return err
 }

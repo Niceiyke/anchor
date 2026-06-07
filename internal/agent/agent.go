@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"sync"
@@ -53,11 +54,14 @@ func (a *Agent) Run(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		if err := a.connect(ctx); err != nil {
-			log.Printf("stream disconnected: %v (retry in %s)", err, backoff)
+			// Add jitter (0–50% of backoff) to avoid thundering herd.
+			jitter := time.Duration(rand.Int63n(int64(backoff) / 2))
+			delay := backoff + jitter
+			log.Printf("stream disconnected: %v (retry in %s)", err, delay)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(backoff):
+			case <-time.After(delay):
 			}
 			if backoff < 30*time.Second {
 				backoff *= 2
@@ -92,6 +96,10 @@ func (a *Agent) connect(ctx context.Context) error {
 			return err
 		}
 		if cmd.Type == protocol.CmdPing {
+			continue
+		}
+		if cmd.Type == protocol.CmdHello {
+			go a.handleHello(cmd)
 			continue
 		}
 		go a.dispatch(ctx, cmd)
@@ -149,9 +157,28 @@ func (a *Agent) dispatch(ctx context.Context, cmd protocol.Command) {
 			return
 		}
 		a.stopApp(ctx, req)
+	case protocol.CmdBackupDB:
+		var req protocol.BackupDBRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.backupDB(ctx, req)
 	default:
 		log.Printf("unknown command type %q", cmd.Type)
 	}
+}
+
+func (a *Agent) handleHello(cmd protocol.Command) {
+	var hello protocol.Hello
+	if err := json.Unmarshal(cmd.Data, &hello); err != nil {
+		return
+	}
+	log.Printf("control plane protocol version %d (agent version %d)", hello.Version, protocol.ProtocolVersion)
+	if hello.Version > protocol.ProtocolVersion {
+		log.Printf("WARNING: control plane protocol is newer (%d > %d) — some commands may be unsupported",
+			hello.Version, protocol.ProtocolVersion)
+	}
+	a.emit(protocol.EvtHello, protocol.Hello{Version: protocol.ProtocolVersion})
 }
 
 // ---- Outbound events -------------------------------------------------------

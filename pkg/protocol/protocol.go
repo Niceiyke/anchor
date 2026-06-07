@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// ProtocolVersion is incremented on breaking changes to the agent protocol.
+const ProtocolVersion = 1
+
 // ---- Control plane -> Agent ------------------------------------------------
 
 type CommandType string
@@ -24,7 +27,9 @@ const (
 	CmdStopApp        CommandType = "stop_app"
 	CmdProvisionDB    CommandType = "provision_db"
 	CmdRemoveDB       CommandType = "remove_db"
+	CmdBackupDB       CommandType = "backup_db"
 	CmdPing           CommandType = "ping"
+	CmdHello          CommandType = "hello"
 )
 
 // Command is a single instruction pushed to an agent over the stream.
@@ -101,6 +106,25 @@ type RemoveDBRequest struct {
 	DeleteVolume bool   `json:"delete_volume"`
 }
 
+// BackupDBRequest is the payload for CmdBackupDB.
+type BackupDBRequest struct {
+	RequestID  string `json:"request_id"`
+	DatabaseID string `json:"database_id"`
+	Engine     string `json:"engine"`
+	Container  string `json:"container"`
+	Username   string `json:"username"`
+	DBName     string `json:"db_name"`
+}
+
+// BackupResult is the payload for EvtBackupResult.
+type BackupResult struct {
+	RequestID  string `json:"request_id"`
+	DatabaseID string `json:"database_id"`
+	Size       int64  `json:"size"`
+	Data       string `json:"data"` // base64-encoded dump file
+	Error      string `json:"error,omitempty"`
+}
+
 // ---- Agent -> Control plane ------------------------------------------------
 
 type EventType string
@@ -112,7 +136,15 @@ const (
 	EvtCommandResult EventType = "command_result"
 	EvtContainerList EventType = "container_list"
 	EvtDBStatus      EventType = "db_status"
+	EvtHello         EventType = "hello"
+	EvtBackupResult  EventType = "backup_result"
 )
+
+// Hello is the payload for CmdHello / EvtHello — sent by the control plane
+// on stream connect, answered by the agent with its own version.
+type Hello struct {
+	Version int `json:"version"`
+}
 
 // Event is a single message reported by an agent.
 type Event struct {

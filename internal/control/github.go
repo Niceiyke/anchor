@@ -64,6 +64,9 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
+	} else {
+		http.Error(w, "webhook secret not configured", http.StatusPreconditionFailed)
+		return
 	}
 	if r.Header.Get("X-GitHub-Event") != "push" {
 		w.WriteHeader(http.StatusNoContent)

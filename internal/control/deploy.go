@@ -12,6 +12,11 @@ import (
 // triggerDeploy creates a Deployment record and dispatches a deploy command to
 // the app's target server. Returns the new deployment.
 func (s *Server) triggerDeploy(app store.App, commitSHA string) (store.Deployment, error) {
+	if !s.tryLockDeploy(app.ID) {
+		return store.Deployment{}, fmt.Errorf("deployment already in progress for %s", app.Name)
+	}
+	defer s.unlockDeploy(app.ID)
+
 	dep := store.Deployment{
 		ID:        "dep_" + randToken()[:12],
 		AppID:     app.ID,
@@ -49,4 +54,22 @@ func (s *Server) triggerDeploy(app store.App, commitSHA string) (store.Deploymen
 		return dep, fmt.Errorf("agent for server %s is offline", app.ServerID)
 	}
 	return dep, nil
+}
+
+// tryLockDeploy acquires the per-app deploy gate. Returns false if a deploy is
+// already running for that app.
+func (s *Server) tryLockDeploy(appID string) bool {
+	s.deployLocksMu.Lock()
+	defer s.deployLocksMu.Unlock()
+	if _, busy := s.deployLocks[appID]; busy {
+		return false
+	}
+	s.deployLocks[appID] = struct{}{}
+	return true
+}
+
+func (s *Server) unlockDeploy(appID string) {
+	s.deployLocksMu.Lock()
+	delete(s.deployLocks, appID)
+	s.deployLocksMu.Unlock()
 }

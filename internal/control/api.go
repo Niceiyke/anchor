@@ -3,10 +3,12 @@ package control
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/oyomworld/anchor/internal/store"
+	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -22,6 +24,10 @@ func readJSON(r *http.Request, v any) error {
 // ---- Auth ----
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.limiter.allow(r) {
+		http.Error(w, "too many attempts", http.StatusTooManyRequests)
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -30,23 +36,46 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	settings, _ := s.store.Settings()
-	if body.Username != settings.AdminUser || !checkPass(body.Password, settings.AdminPass) {
+
+	// Try users table first, then fall back to bootstrap admin in settings.
+	var authenticated bool
+	var role string
+	if u, err := s.store.GetUserByUsername(body.Username); err == nil {
+		if checkPass(body.Password, u.PasswordHash) {
+			authenticated = true
+			role = u.Role
+		}
+	} else {
+		settings, _ := s.store.Settings()
+		if body.Username == settings.AdminUser && checkPass(body.Password, settings.AdminPass) {
+			authenticated = true
+			role = "admin"
+			if isLegacyHash(settings.AdminPass) {
+				settings.AdminPass = hashPass(body.Password)
+				_ = s.store.SaveSettings(settings)
+			}
+		}
+	}
+
+	if !authenticated {
+		s.limiter.record(r)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	// Transparently upgrade a legacy sha256 hash to bcrypt on successful login.
-	if isLegacyHash(settings.AdminPass) {
-		settings.AdminPass = hashPass(body.Password)
-		_ = s.store.SaveSettings(settings)
-	}
-	tok := s.auth.issue()
+
+	tok := s.auth.issueWithRole(body.Username, role)
 	http.SetCookie(w, &http.Cookie{
 		Name: "anchor_session", Value: tok, Path: "/",
-		HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Expires: time.Now().Add(24 * time.Hour),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+		Expires: time.Now().Add(7 * 24 * time.Hour),
 	})
-	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
+	csrf := s.auth.csrfToken()
+	http.SetCookie(w, &http.Cookie{
+		Name: "anchor_csrf", Value: csrf, Path: "/",
+		SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+		Expires: time.Now().Add(7 * 24 * time.Hour),
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"token": tok, "csrf_token": csrf, "role": role})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -56,8 +85,29 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	settings, _ := s.store.Settings()
-	writeJSON(w, http.StatusOK, map[string]string{"username": settings.AdminUser})
+	tok := bearer(r)
+	parts := strings.SplitN(tok, ":", 3)
+	username := ""
+	role := ""
+	if len(parts) == 3 {
+		username = parts[0]
+		role = parts[1]
+	} else {
+		settings, _ := s.store.Settings()
+		username = settings.AdminUser
+		role = "admin"
+	}
+	// Self-heal sessions established before CSRF was introduced: if the session
+	// is valid but the double-submit cookie is missing, issue one so mutating
+	// requests work without forcing a re-login.
+	if _, err := r.Cookie("anchor_csrf"); err != nil {
+		http.SetCookie(w, &http.Cookie{
+			Name: "anchor_csrf", Value: s.auth.csrfToken(), Path: "/",
+			SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+			Expires: time.Now().Add(7 * 24 * time.Hour),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"username": username, "role": role})
 }
 
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -83,8 +133,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Invalidate all other sessions; keep the caller logged in by re-issuing.
-	_ = s.store.DeleteExpiredSessions(time.Now())
+	// Revoke the admin's other sessions (log out other devices); keep the
+	// caller logged in via their current token.
+	_ = s.store.DeleteSessionsForUser(settings.AdminUser, bearer(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -123,8 +174,30 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
-	_ = s.store.DeleteServer(r.PathValue("id"))
+	id := r.PathValue("id")
+	// Cascade: remove databases and apps belonging to this server.
+	for _, db := range s.mustListDatabases() {
+		if db.ServerID == id {
+			_ = s.store.DeleteDatabase(db.ID)
+		}
+	}
+	for _, app := range s.mustListApps() {
+		if app.ServerID == id {
+			_ = s.store.DeleteApp(app.ID)
+		}
+	}
+	_ = s.store.DeleteServer(id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) mustListDatabases() []store.Database {
+	dbs, _ := s.store.ListDatabases()
+	return dbs
+}
+
+func (s *Server) mustListApps() []store.App {
+	apps, _ := s.store.ListApps()
+	return apps
 }
 
 // ---- Apps ----
@@ -190,6 +263,39 @@ func (s *Server) handleDeployApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, dep)
 }
 
+func (s *Server) handleStopApp(w http.ResponseWriter, r *http.Request) {
+	a, err := s.store.GetApp(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name})
+	cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdStopApp, Data: payload}
+	if !s.hub.Send(a.ServerID, cmd) {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *Server) handleRollbackApp(w http.ResponseWriter, r *http.Request) {
+	a, err := s.store.GetApp(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if a.LastGoodSHA == "" {
+		http.Error(w, "no previous successful deployment to roll back to", http.StatusPreconditionFailed)
+		return
+	}
+	dep, err := s.triggerDeploy(a, a.LastGoodSHA)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "deployment_id": dep.ID})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, dep)
+}
+
 // ---- Deployments ----
 
 func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
@@ -214,19 +320,21 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, _ := s.store.Settings()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"admin_user":            settings.AdminUser,
-		"github_token_set":      settings.GitHubToken != "",
-		"webhook_secret_set":    settings.WebhookSecret != "",
-		"github_app_configured": settings.GitHubAppConfigured(),
-		"github_app_installed":  settings.GitHubInstallationID != 0,
-		"github_app_slug":       settings.GitHubAppSlug,
+		"admin_user":               settings.AdminUser,
+		"github_token_set":         settings.GitHubToken != "",
+		"webhook_secret_set":       settings.WebhookSecret != "",
+		"github_app_configured":    settings.GitHubAppConfigured(),
+		"github_app_installed":     settings.GitHubInstallationID != 0,
+		"github_app_slug":          settings.GitHubAppSlug,
+		"notification_webhook_set": settings.NotificationWebhook != "",
 	})
 }
 
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		GitHubToken   *string `json:"github_token"`
-		WebhookSecret *string `json:"webhook_secret"`
+		GitHubToken         *string `json:"github_token"`
+		WebhookSecret       *string `json:"webhook_secret"`
+		NotificationWebhook *string `json:"notification_webhook"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -239,9 +347,92 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if body.WebhookSecret != nil {
 		settings.WebhookSecret = *body.WebhookSecret
 	}
+	if body.NotificationWebhook != nil {
+		settings.NotificationWebhook = *body.NotificationWebhook
+	}
 	if err := s.store.SaveSettings(settings); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- Server stats ----
+
+func (s *Server) handleServerStats(w http.ResponseWriter, r *http.Request) {
+	serverID := r.PathValue("id")
+	since := time.Now().Add(-24 * time.Hour)
+	if q := r.URL.Query().Get("since"); q != "" {
+		if t, err := time.Parse(time.RFC3339, q); err == nil {
+			since = t
+		}
+	}
+	limit := 200
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 5000 {
+			limit = n
+		}
+	}
+	stats, _ := s.store.ServerStats(serverID, since, limit)
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// ---- Users ----
+
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	users, _ := s.store.ListUsers()
+	for i := range users {
+		users[i].PasswordHash = "" // never leak password hashes
+	}
+	if users == nil {
+		users = []store.User{}
+	}
+	writeJSON(w, http.StatusOK, users)
+}
+
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Username == "" || body.Password == "" {
+		http.Error(w, "username and password required", http.StatusBadRequest)
+		return
+	}
+	if body.Role != "admin" && body.Role != "viewer" {
+		body.Role = "viewer"
+	}
+	if _, err := s.store.GetUserByUsername(body.Username); err == nil {
+		http.Error(w, "username already exists", http.StatusConflict)
+		return
+	}
+	u := store.User{
+		ID:           "usr_" + randToken()[:12],
+		Username:     body.Username,
+		PasswordHash: hashPass(body.Password),
+		Role:         body.Role,
+		CreatedAt:    time.Now(),
+	}
+	if err := s.store.CreateUser(u); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	u.PasswordHash = ""
+	writeJSON(w, http.StatusCreated, u)
+}
+
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	settings, _ := s.store.Settings()
+	if u, err := s.store.GetUser(id); err == nil && u.Username == settings.AdminUser {
+		http.Error(w, "cannot delete the bootstrap admin user", http.StatusBadRequest)
+		return
+	}
+	_ = s.store.DeleteUser(id)
 	w.WriteHeader(http.StatusNoContent)
 }

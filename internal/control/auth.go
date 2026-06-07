@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oyomworld/anchor/internal/store"
@@ -67,6 +69,25 @@ func (a *auth) issue() string {
 	return tok
 }
 
+func (a *auth) issueWithRole(username, role string) string {
+	tok := username + ":" + role + ":" + randToken()
+	_ = a.store.CreateSession(tok, time.Now().Add(a.ttl))
+	return tok
+}
+
+func (a *auth) csrfToken() string {
+	return randToken()
+}
+
+// roleFromToken extracts the role from a session token (for RBAC checks).
+func roleFromToken(tok string) string {
+	parts := strings.SplitN(tok, ":", 3)
+	if len(parts) == 3 {
+		return parts[1]
+	}
+	return ""
+}
+
 func (a *auth) valid(tok string) bool {
 	if tok == "" {
 		return false
@@ -95,4 +116,81 @@ func bearer(r *http.Request) string {
 		return c.Value
 	}
 	return ""
+}
+
+// ---- rate limiter (token bucket per remote IP) ----
+
+type rateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time // IP -> timestamps of failed attempts
+}
+
+func newRateLimiter() *rateLimiter {
+	rl := &rateLimiter{attempts: map[string][]time.Time{}}
+	go rl.reapLoop()
+	return rl
+}
+
+// allow reports whether the request should be processed. It records attempts
+// internally regardless of outcome; call record on auth failure separately.
+func (rl *rateLimiter) allow(r *http.Request) bool {
+	ip := clientIP(r)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	window := now.Add(-1 * time.Minute)
+	recent := 0
+	filtered := rl.attempts[ip][:0]
+	for _, t := range rl.attempts[ip] {
+		if t.After(window) {
+			filtered = append(filtered, t)
+			recent++
+		}
+	}
+	rl.attempts[ip] = filtered
+	return recent < 10
+}
+
+// record registers a failed attempt for rate-limit purposes.
+func (rl *rateLimiter) record(r *http.Request) {
+	ip := clientIP(r)
+	rl.mu.Lock()
+	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
+	rl.mu.Unlock()
+}
+
+func (rl *rateLimiter) reapLoop() {
+	for range time.NewTicker(5 * time.Minute).C {
+		rl.mu.Lock()
+		threshold := time.Now().Add(-2 * time.Minute)
+		for ip, times := range rl.attempts {
+			var keep []time.Time
+			for _, t := range times {
+				if t.After(threshold) {
+					keep = append(keep, t)
+				}
+			}
+			if len(keep) == 0 {
+				delete(rl.attempts, ip)
+			} else {
+				rl.attempts[ip] = keep
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+func clientIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		idx := strings.IndexByte(fwd, ',')
+		if idx >= 0 {
+			fwd = fwd[:idx]
+		}
+		return strings.TrimSpace(fwd)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

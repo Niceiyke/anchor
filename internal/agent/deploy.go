@@ -54,6 +54,7 @@ func (a *Agent) runDeploy(ctx context.Context, req protocol.DeployRequest) {
 		}
 	}
 
+	a.checkHealth(ctx, req)
 	a.emitStatus(depID, protocol.PhaseSuccess, "Deployment successful", string(stack))
 }
 
@@ -209,4 +210,27 @@ func (a *Agent) pipeLogs(depID, stream string, r io.Reader) {
 	for sc.Scan() {
 		a.emitLog(depID, "", stream, sc.Text())
 	}
+}
+
+// checkHealth verifies the deployed container is running and its port is
+// reachable on the docker network. A failure is emitted as a warning log but
+// does not fail the deployment — the app may need a moment to bind.
+func (a *Agent) checkHealth(ctx context.Context, req protocol.DeployRequest) {
+	container := sanitize(req.AppName)
+	out, err := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Running}}", container).Output()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		a.emitLog(req.DeploymentID, "", "system", "WARN: container health check failed: container not running")
+		return
+	}
+	target := fmt.Sprintf("%s:%d", container, req.ContainerPort)
+	// best-effort TCP check (requires nc/netcat in the agent image)
+	status, err := exec.CommandContext(ctx, "sh", "-c",
+		"command -v nc >/dev/null && nc -z -w3 "+strings.Fields(target)[0]+" "+
+			strings.Fields(target)[1]+" 2>/dev/null && echo ok || echo fail").Output()
+	if err != nil || strings.TrimSpace(string(status)) != "ok" {
+		a.emitLog(req.DeploymentID, "", "system",
+			"WARN: port check skipped or failed on "+target+" (app may still be starting)")
+		return
+	}
+	a.emitLog(req.DeploymentID, "", "system", "Health check passed: "+target+" is reachable")
 }

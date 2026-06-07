@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEncryptedSettingsAtRest(t *testing.T) {
@@ -52,6 +53,47 @@ func TestEncryptedSettingsAtRest(t *testing.T) {
 	}
 	if got.GitHubAppPrivateKey != "-----BEGIN RSA PRIVATE KEY-----" {
 		t.Errorf("decrypt key = %q", got.GitHubAppPrivateKey)
+	}
+}
+
+// TestEncryptedAgentTokenLookup guards the regression where agent tokens were
+// encrypted with a random nonce, making GetServerByToken (an exact-match lookup)
+// fail for every server — breaking agent authentication entirely.
+func TestEncryptedAgentTokenLookup(t *testing.T) {
+	inner, _ := Open(filepath.Join(t.TempDir(), "s.json"))
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	enc, err := NewEncrypted(inner, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const tok = "agent-secret-token-123"
+	if err := enc.CreateServer(Server{ID: "srv_1", Name: "vps", AgentToken: tok, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The token must be ciphertext at rest, not plaintext.
+	raw, _ := inner.GetServer("srv_1")
+	if !strings.HasPrefix(raw.AgentToken, encPrefix) || strings.Contains(raw.AgentToken, tok) {
+		t.Errorf("agent token not encrypted at rest: %q", raw.AgentToken)
+	}
+
+	// The agent authenticates with the plaintext token — it must resolve.
+	srv, err := enc.GetServerByToken(tok)
+	if err != nil {
+		t.Fatalf("agent auth broken: GetServerByToken(plaintext) -> %v", err)
+	}
+	if srv.ID != "srv_1" || srv.AgentToken != tok {
+		t.Fatalf("wrong server/token: %+v", srv)
+	}
+
+	// EnsureLocalServer-style idempotency: a second lookup still resolves (the
+	// deterministic ciphertext is stable), so no duplicate row is created.
+	if _, err := enc.GetServerByToken(tok); err != nil {
+		t.Fatalf("second lookup failed (would cause duplicate local servers): %v", err)
 	}
 }
 
