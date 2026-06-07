@@ -2,8 +2,10 @@ package control
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // broadcaster is a tiny topic-based pub/sub used to push live events
@@ -68,16 +70,34 @@ func (s *Server) handleEventStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	// no-transform stops Cloudflare/other proxies from compressing/buffering the
+	// stream; X-Accel-Buffering disables proxy (nginx/CF) response buffering.
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	ch := s.live.subscribe(topic)
 	defer s.live.unsubscribe(topic, ch)
+
+	// Open the stream immediately (don't wait for the first event) so the
+	// client's onopen fires and intermediary proxies start streaming rather
+	// than buffering an idle connection.
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, ": connected\n\n")
+	flusher.Flush()
+
+	// Heartbeat keeps the connection alive through proxy idle timeouts
+	// (Cloudflare ~100s) and forces a periodic flush.
+	heartbeat := time.NewTicker(20 * time.Second)
+	defer heartbeat.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-heartbeat.C:
+			io.WriteString(w, ": ping\n\n")
+			flusher.Flush()
 		case msg := <-ch:
 			b, _ := json.Marshal(msg)
 			w.Write([]byte("data: "))
