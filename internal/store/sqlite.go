@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS apps (
 	auto_deploy    INTEGER NOT NULL DEFAULT 0,
 	env_vars       TEXT NOT NULL DEFAULT '{}',
 	last_good_sha  TEXT NOT NULL DEFAULT '',
+	compose_file   TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_apps_repo ON apps(repo_full_name);
@@ -124,9 +125,11 @@ CREATE TABLE IF NOT EXISTS users (
 	created_at    TEXT NOT NULL
 );
 `)
-	// Migrate: add last_good_sha column if it doesn't exist (for pre-existing DBs).
+	// Migrate: add columns that may be missing on pre-existing DBs. ALTER fails
+	// harmlessly if the column already exists.
 	if err == nil {
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN last_good_sha TEXT NOT NULL DEFAULT ''`)
+		s.db.Exec(`ALTER TABLE apps ADD COLUMN compose_file TEXT NOT NULL DEFAULT ''`)
 	}
 	return err
 }
@@ -256,7 +259,7 @@ func scanApp(r scanner) (App, error) {
 	var envRaw, createdAt string
 	var auto int
 	if err := r.Scan(&v.ID, &v.Name, &v.ServerID, &v.RepoFullName, &v.RepoURL, &v.Branch,
-		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &createdAt); err != nil {
+		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &v.ComposeFile, &createdAt); err != nil {
 		return v, err
 	}
 	v.AutoDeploy = auto == 1
@@ -266,7 +269,7 @@ func scanApp(r scanner) (App, error) {
 	return v, nil
 }
 
-const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, created_at`
+const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, compose_file, created_at`
 
 func (s *sqliteStore) ListApps() ([]App, error) {
 	rows, err := s.db.Query(`SELECT ` + appCols + ` FROM apps ORDER BY created_at`)
@@ -312,15 +315,15 @@ func (s *sqliteStore) AppsByRepo(fullName string) ([]App, error) {
 }
 
 func (s *sqliteStore) CreateApp(v App) error {
-	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.ID, v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain,
-		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, tsFmt(v.CreatedAt))
+		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, tsFmt(v.CreatedAt))
 	return err
 }
 
 func (s *sqliteStore) UpdateApp(v App) error {
-	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=? WHERE id=?`,
-		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ID)
+	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=?, compose_file=? WHERE id=?`,
+		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.ID)
 	return affected(res, err)
 }
 

@@ -24,14 +24,24 @@ export function Apps() {
 
   const [form, setForm] = useState({
     name: "", server_id: "", repo_full_name: "", repo_url: "", branch: "main",
-    domain: "", container_port: 3000, auto_deploy: true,
+    domain: "", container_port: 3000, auto_deploy: true, compose_file: "",
+  });
+
+  // Discover compose files in the selected repo/branch so the user can pick one
+  // when there are several. Falls back to a free-text field if discovery can't
+  // run (no GitHub, or a pasted clone URL with no owner/name).
+  const { data: composeFiles = [] } = useQuery({
+    queryKey: ["compose-files", form.repo_full_name, form.branch],
+    queryFn: () => api.get<string[]>(`/api/github/compose-files?repo=${encodeURIComponent(form.repo_full_name)}&branch=${encodeURIComponent(form.branch)}`),
+    enabled: githubReady && !!form.repo_full_name && !!form.branch,
+    retry: false,
   });
 
   const create = useMutation({
     mutationFn: () => api.post<App>("/api/apps", { ...form, env_vars: {} }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["apps"] });
-      setForm({ ...form, name: "", domain: "" });
+      setForm({ ...form, name: "", domain: "", compose_file: "" });
     },
   });
 
@@ -43,6 +53,7 @@ export function Apps() {
       repo_url: r?.clone_url ?? "",
       branch: r?.default_branch ?? "main",
       name: f.name || (fullName.split("/")[1] ?? ""),
+      compose_file: "", // reset — a different repo has different files
     }));
   }
 
@@ -91,6 +102,21 @@ export function Apps() {
             <input type="number" value={form.container_port} onChange={(e) => setForm({ ...form, container_port: +e.target.value })} />
           </div>
         </div>
+
+        <label style={{ marginTop: 12 }}>Compose file <span className="muted">(optional — leave on auto-detect for a single compose/Dockerfile)</span></label>
+        {composeFiles.length > 0 ? (
+          <select value={form.compose_file} onChange={(e) => setForm({ ...form, compose_file: e.target.value })}>
+            <option value="">Auto-detect</option>
+            {composeFiles.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        ) : (
+          <input
+            value={form.compose_file}
+            onChange={(e) => setForm({ ...form, compose_file: e.target.value })}
+            placeholder="auto-detect — or e.g. docker-compose.prod.yml"
+          />
+        )}
+
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
           <input type="checkbox" style={{ width: "auto" }} checked={form.auto_deploy} onChange={(e) => setForm({ ...form, auto_deploy: e.target.checked })} />
           Auto-deploy on push

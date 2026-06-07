@@ -27,6 +27,12 @@ func (a *Agent) runDeploy(ctx context.Context, req protocol.DeployRequest) {
 
 	a.emitStatus(depID, protocol.PhaseDetecting, "Detecting stack", "")
 	stack := detectStack(appDir)
+	if req.ComposeFile != "" {
+		// An explicit compose file was chosen (it may live in a subdirectory the
+		// root auto-detect wouldn't see), so force the compose path.
+		stack = stackCompose
+		a.emitLog(depID, "", "system", "Using compose file: "+req.ComposeFile)
+	}
 	if stack == stackUnknown {
 		a.fail(depID, "no Dockerfile or docker-compose found", nil)
 		return
@@ -123,13 +129,22 @@ func detectStack(dir string) stackType {
 }
 
 // deployCompose writes an env file and runs `docker compose up -d --build`.
+// When req.ComposeFile is set it's passed via -f; Compose then treats that
+// file's directory as the project root, so the .env is written there.
 func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, appDir string) error {
-	if err := writeEnvFile(appDir, req.EnvVars); err != nil {
+	args := []string{"compose"}
+	envDir := appDir
+	if req.ComposeFile != "" {
+		args = append(args, "-f", req.ComposeFile)
+		envDir = filepath.Dir(filepath.Join(appDir, req.ComposeFile))
+	}
+	if err := writeEnvFile(envDir, req.EnvVars); err != nil {
 		return err
 	}
 	project := sanitize(req.AppName)
+	args = append(args, "-p", project, "up", "-d", "--build", "--remove-orphans")
 	a.emitStatus(req.DeploymentID, protocol.PhaseStarting, "Starting services", string(stackCompose))
-	return a.run(ctx, req.DeploymentID, appDir, "docker", "compose", "-p", project, "up", "-d", "--build", "--remove-orphans")
+	return a.run(ctx, req.DeploymentID, appDir, "docker", args...)
 }
 
 // deployDockerfile builds an image and runs a single container, replacing any
