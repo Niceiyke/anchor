@@ -249,6 +249,62 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// handleUpdateApp patches an app's deploy configuration. Only the fields
+// present in the body are changed (all pointers). Identity fields (server,
+// repo) are intentionally immutable — changing them would orphan the running
+// container; recreate the app instead. Changes apply on the next deploy.
+func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
+	a, err := s.store.GetApp(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Branch        *string `json:"branch"`
+		Domain        *string `json:"domain"`
+		ContainerPort *int    `json:"container_port"`
+		AutoDeploy    *bool   `json:"auto_deploy"`
+		ComposeFile   *string `json:"compose_file"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Branch != nil {
+		if strings.TrimSpace(*body.Branch) == "" {
+			http.Error(w, "branch cannot be empty", http.StatusBadRequest)
+			return
+		}
+		a.Branch = strings.TrimSpace(*body.Branch)
+	}
+	if body.Domain != nil {
+		a.Domain = strings.TrimSpace(*body.Domain)
+	}
+	if body.ContainerPort != nil {
+		if *body.ContainerPort <= 0 || *body.ContainerPort > 65535 {
+			http.Error(w, "container_port out of range", http.StatusBadRequest)
+			return
+		}
+		a.ContainerPort = *body.ContainerPort
+	}
+	if body.AutoDeploy != nil {
+		a.AutoDeploy = *body.AutoDeploy
+	}
+	if body.ComposeFile != nil {
+		cf := strings.TrimSpace(*body.ComposeFile)
+		if !validComposePath(cf) {
+			http.Error(w, "invalid compose file path", http.StatusBadRequest)
+			return
+		}
+		a.ComposeFile = cf
+	}
+	if err := s.store.UpdateApp(a); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
 func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.DeleteApp(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
