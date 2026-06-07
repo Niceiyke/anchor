@@ -245,6 +245,8 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	go s.cfEnsureDomain(a.Domain) // best-effort Cloudflare A record
+	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusCreated, a)
 }
 
@@ -286,6 +288,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		a.Branch = strings.TrimSpace(*body.Branch)
 	}
+	oldDomain := a.Domain
 	if body.Domain != nil {
 		a.Domain = strings.TrimSpace(*body.Domain)
 	}
@@ -311,6 +314,13 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if a.Domain != oldDomain {
+		if oldDomain != "" {
+			go s.cfDeleteDomain(oldDomain)
+		}
+		go s.cfEnsureDomain(a.Domain)
+	}
+	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusOK, a)
 }
 
@@ -322,6 +332,7 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 		payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name})
 		cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdStopApp, Data: payload}
 		s.hub.Send(a.ServerID, cmd) // best-effort; agent may be offline
+		go s.cfDeleteDomain(a.Domain)
 	}
 	_ = s.store.DeleteApp(id)
 	w.WriteHeader(http.StatusNoContent)
@@ -412,6 +423,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"github_app_slug":          settings.GitHubAppSlug,
 		"notification_webhook_set": settings.NotificationWebhook != "",
 		"base_domain":              settings.BaseDomain,
+		"cloudflare_configured":    settings.CloudflareAPIToken != "",
+		"public_ip":                settings.PublicIP,
 	})
 }
 
@@ -421,6 +434,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		WebhookSecret       *string `json:"webhook_secret"`
 		NotificationWebhook *string `json:"notification_webhook"`
 		BaseDomain          *string `json:"base_domain"`
+		CloudflareAPIToken  *string `json:"cloudflare_api_token"`
+		PublicIP            *string `json:"public_ip"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -438,6 +453,12 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.BaseDomain != nil {
 		settings.BaseDomain = normalizeBaseDomain(*body.BaseDomain)
+	}
+	if body.CloudflareAPIToken != nil {
+		settings.CloudflareAPIToken = strings.TrimSpace(*body.CloudflareAPIToken)
+	}
+	if body.PublicIP != nil {
+		settings.PublicIP = strings.TrimSpace(*body.PublicIP)
 	}
 	if err := s.store.SaveSettings(settings); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

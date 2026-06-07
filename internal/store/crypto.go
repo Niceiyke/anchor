@@ -92,6 +92,7 @@ func (c *cryptoStore) transformSettings(s *Settings, fn func(string) string) {
 	s.GitHubAppPrivateKey = fn(s.GitHubAppPrivateKey)
 	s.GitHubAppWebhookSecret = fn(s.GitHubAppWebhookSecret)
 	s.GitHubClientSecret = fn(s.GitHubClientSecret)
+	s.CloudflareAPIToken = fn(s.CloudflareAPIToken)
 }
 
 func (c *cryptoStore) Settings() (Settings, error) {

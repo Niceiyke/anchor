@@ -11,6 +11,8 @@ interface SettingsStatus {
   github_app_slug: string;
   notification_webhook_set: boolean;
   base_domain: string;
+  cloudflare_configured: boolean;
+  public_ip: string;
 }
 
 export function Settings() {
@@ -66,6 +68,16 @@ export function Settings() {
           <code>*.{data?.base_domain || "apps.example.com"}</code> → this server's IP.
         </p>
         <DomainSection current={data?.base_domain ?? ""} onSaved={() => qc.invalidateQueries({ queryKey: ["settings"] })} />
+      </div>
+
+      <div className="card">
+        <strong>Cloudflare DNS</strong>
+        <p className="muted">
+          Optional. With a Cloudflare API token, Anchor creates/removes the DNS
+          A records for app domains automatically — no manual wildcard record
+          needed. Use a token scoped to <code>Zone:DNS:Edit</code> + <code>Zone:Read</code> for your zone.
+        </p>
+        <CloudflareSection configured={data?.cloudflare_configured ?? false} publicIP={data?.public_ip ?? ""} onSaved={() => qc.invalidateQueries({ queryKey: ["settings"] })} />
       </div>
 
       <div className="card">
@@ -145,6 +157,44 @@ export function Settings() {
 
       <UserSection />
     </>
+  );
+}
+
+function CloudflareSection({ configured, publicIP, onSaved }: { configured: boolean; publicIP: string; onSaved: () => void }) {
+  const [token, setToken] = useState("");
+  const [ip, setIp] = useState(publicIP);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { setIp(publicIP); }, [publicIP]);
+
+  const save = useMutation({
+    mutationFn: () => api.put("/api/settings", { ...(token ? { cloudflare_api_token: token } : {}), public_ip: ip.trim() }),
+    onSuccess: () => { setToken(""); setMsg("Saved."); onSaved(); },
+    onError: (e) => setMsg((e as Error).message),
+  });
+  const clear = useMutation({
+    mutationFn: () => api.put("/api/settings", { cloudflare_api_token: "" }),
+    onSuccess: () => { setMsg("Removed."); onSaved(); },
+  });
+  const verify = useMutation({
+    mutationFn: () => api.post<{ zone: string; zone_id: string; public_ip: string }>("/api/cloudflare/verify"),
+    onSuccess: (r) => setMsg(`✓ Token works — zone ${r.zone}${r.public_ip ? `, records → ${r.public_ip}` : ""}.`),
+    onError: (e) => setMsg((e as Error).message),
+  });
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="row">
+        <input type="password" placeholder={configured ? "•••••••• (set — paste to replace)" : "Cloudflare API token"} value={token} onChange={(e) => setToken(e.target.value)} />
+      </div>
+      <div className="row" style={{ marginTop: 8 }}>
+        <input type="text" placeholder="Public IP (blank = auto-detect)" value={ip} onChange={(e) => setIp(e.target.value)} />
+        <button className="btn" disabled={save.isPending || (!token && ip.trim() === publicIP)} onClick={() => { setMsg(""); save.mutate(); }}>Save</button>
+        {configured && <button className="btn secondary" disabled={verify.isPending} onClick={() => { setMsg(""); verify.mutate(); }}>{verify.isPending ? "Verifying…" : "Verify"}</button>}
+        {configured && <button className="btn secondary" onClick={() => { setMsg(""); clear.mutate(); }}>Remove</button>}
+      </div>
+      {configured && <div className="muted" style={{ marginTop: 4 }}><span className="dot on" /> Token configured</div>}
+      {msg && <div className={save.isError || verify.isError || clear.isError ? "error" : "muted"} style={save.isSuccess || verify.isSuccess ? { color: "var(--green)", marginTop: 4 } : { marginTop: 4 }}>{msg}</div>}
+    </div>
   );
 }
 

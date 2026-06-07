@@ -150,6 +150,12 @@ type Settings struct {
 	// BaseDomain auto-assigns apps a subdomain (<slug>.<base_domain>) when no
 	// custom domain is set. Requires a wildcard DNS record (*.<base_domain>).
 	BaseDomain string `json:"base_domain"`
+
+	// Cloudflare DNS automation. When CloudflareAPIToken is set, Anchor creates
+	// /deletes A records for app domains pointing at PublicIP (auto-detected if
+	// blank), so you don't have to manage DNS by hand.
+	CloudflareAPIToken string `json:"cloudflare_api_token"`
+	PublicIP           string `json:"public_ip"`
 }
 
 // GitHubAppConfigured reports whether a GitHub App is fully set up.

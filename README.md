@@ -159,15 +159,19 @@ Apps created without a custom domain then get `<slug>.<base>` automatically
 first request — gated by an `ask` endpoint (`/tls/check`) so it only mints certs
 for domains Anchor manages.
 
-**One-time setup:** add a wildcard DNS record so the subdomains resolve to the
-box:
+**DNS — two ways:**
 
-```
-*.apps.example.com   A   <your VPS IP>
-```
+- **Cloudflare integration (zero manual DNS):** add a Cloudflare API token in
+  **Settings → Cloudflare DNS** (scoped `Zone:DNS:Edit` + `Zone:Read`). Anchor
+  then creates an A record for each app domain (and deletes it when the app is
+  removed), pointing at the server's public IP (auto-detected, or set one). Hit
+  **Verify** to confirm the token sees your zone. No wildcard record needed.
+- **Manual:** add a wildcard record yourself —
+  `*.apps.example.com  A  <your VPS IP>`.
 
-You can still type a custom domain per app to override the auto one (point its
-DNS at the server and it gets HTTPS the same way).
+Either way, Caddy issues the certificate on demand. You can still type a custom
+domain per app to override the auto one (point its DNS at the server — or, if
+it's in your Cloudflare zone, Anchor creates that record too).
 
 ## Managing an app
 
