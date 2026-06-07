@@ -7,11 +7,24 @@ export class ApiError extends Error {
   }
 }
 
+function csrfToken(): string | null {
+  const m = document.cookie.match(/(?:^|;\s*)anchor_csrf=([^;]*)/);
+  return m ? m[1] : null;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  const csrf = csrfToken();
+  if (csrf && method !== "GET" && method !== "HEAD") {
+    headers["X-CSRF-Token"] = csrf;
+  }
+  if (body) {
+    headers["Content-Type"] = "application/json";
+  }
   const res = await fetch(path, {
     method,
     credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -61,6 +74,7 @@ export interface App {
   container_port: number;
   auto_deploy: boolean;
   env_vars: Record<string, string>;
+  last_good_sha?: string;
   created_at: string;
 }
 

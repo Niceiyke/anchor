@@ -53,6 +53,13 @@ func (s *Server) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(20 * time.Second)
 	defer keepalive.Stop()
 
+	// Send protocol version handshake so the agent can bail if incompatible.
+	hello, _ := json.Marshal(protocol.Hello{Version: protocol.ProtocolVersion})
+	if err := enc.Encode(protocol.Command{ID: "hello", Type: protocol.CmdHello, Data: hello}); err != nil {
+		return
+	}
+	flusher.Flush()
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -115,6 +122,17 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 			UpdatedAt:  time.Now(),
 		}
 		_ = s.store.UpdateServer(srv)
+		_ = s.store.InsertServerStat(store.ServerStat{
+			ServerID:   serverID,
+			CPUPercent: st.CPUPercent,
+			MemUsed:    st.MemUsed,
+			MemTotal:   st.MemTotal,
+			DiskUsed:   st.DiskUsed,
+			DiskTotal:  st.DiskTotal,
+			Containers: st.Containers,
+			Load1:      st.LoadAvg[0],
+			At:         time.Now(),
+		})
 
 	case protocol.EvtDeployStatus:
 		var ds protocol.DeployStatus
@@ -133,6 +151,13 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 		dep.UpdatedAt = time.Now()
 		_ = s.store.UpdateDeployment(dep)
 		s.broadcast(deploymentTopic(ds.DeploymentID), evt)
+		s.notifyDeployStatus(dep.AppID, dep, ds)
+		if ds.Phase == protocol.PhaseSuccess && dep.CommitSHA != "" {
+			if app, err := s.store.GetApp(dep.AppID); err == nil {
+				app.LastGoodSHA = dep.CommitSHA
+				_ = s.store.UpdateApp(app)
+			}
+		}
 
 	case protocol.EvtLog:
 		var ll protocol.LogLine
@@ -141,14 +166,7 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 		}
 		switch {
 		case ll.DeploymentID != "":
-			if dep, err := s.store.GetDeployment(ll.DeploymentID); err == nil {
-				dep.Logs = append(dep.Logs, store.LogLine{Stream: ll.Stream, Line: ll.Line, At: evt.Timestamp})
-				if len(dep.Logs) > 5000 {
-					dep.Logs = dep.Logs[len(dep.Logs)-5000:]
-				}
-				dep.UpdatedAt = time.Now()
-				_ = s.store.UpdateDeployment(dep)
-			}
+			_ = s.store.AppendDeploymentLog(ll.DeploymentID, store.LogLine{Stream: ll.Stream, Line: ll.Line, At: evt.Timestamp})
 			s.broadcast(deploymentTopic(ll.DeploymentID), evt)
 		case ll.RequestID != "":
 			// live terminal/exec output — not persisted
@@ -180,5 +198,12 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 			_ = s.store.UpdateDatabase(db)
 			s.broadcast("database:"+ds.DatabaseID, evt)
 		}
+
+	case protocol.EvtBackupResult:
+		var br protocol.BackupResult
+		if json.Unmarshal(evt.Data, &br) != nil {
+			return
+		}
+		s.deliverReply(br.RequestID, evt)
 	}
 }

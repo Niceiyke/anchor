@@ -169,3 +169,52 @@ func dbSanitize(s string) string {
 	}
 	return out
 }
+
+// handleBackupDatabase triggers a backup (pg_dump / redis SAVE) and returns the
+// result synchronously via the request/reply channel.
+func (s *Server) handleBackupDatabase(w http.ResponseWriter, r *http.Request) {
+	db, err := s.store.GetDatabase(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if !s.hub.Online(db.ServerID) {
+		http.Error(w, "server agent offline", http.StatusConflict)
+		return
+	}
+
+	reqID := "bkup_" + randToken()[:12]
+	ch, cancel := s.awaitReply(reqID)
+	defer cancel()
+
+	payload, _ := json.Marshal(protocol.BackupDBRequest{
+		RequestID:  reqID,
+		DatabaseID: db.ID,
+		Engine:     db.Engine,
+		Container:  db.Container,
+		Username:   db.Username,
+		DBName:     db.DBName,
+	})
+	cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdBackupDB, Data: payload}
+	if !s.hub.Send(db.ServerID, cmd) {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+
+	select {
+	case evt := <-ch:
+		var result protocol.BackupResult
+		_ = json.Unmarshal(evt.Data, &result)
+		if result.Error != "" {
+			http.Error(w, result.Error, http.StatusInternalServerError)
+			return
+		}
+		// Stream the backup as a downloadable file.
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="backup-%s-%s.sql"`, db.Name, time.Now().UTC().Format("20060102-150405")))
+		w.Write([]byte(result.Data))
+	case <-time.After(60 * time.Second):
+		http.Error(w, "backup timed out", http.StatusGatewayTimeout)
+	case <-r.Context().Done():
+	}
+}

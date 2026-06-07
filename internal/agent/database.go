@@ -66,3 +66,30 @@ func (a *Agent) removeDB(ctx context.Context, req protocol.RemoveDBRequest) {
 func (a *Agent) emitDBStatus(id, status, msg string) {
 	a.emit(protocol.EvtDBStatus, protocol.DBStatus{DatabaseID: id, Status: status, Message: msg})
 }
+
+func (a *Agent) backupDB(ctx context.Context, req protocol.BackupDBRequest) {
+	var cmd *exec.Cmd
+	switch req.Engine {
+	case "postgres":
+		cmd = exec.CommandContext(ctx, "docker", "exec", req.Container,
+			"pg_dump", "-U", req.Username, "-d", req.DBName, "--no-owner", "--no-acl", "--clean")
+	case "redis":
+		cmd = exec.CommandContext(ctx, "docker", "exec", req.Container,
+			"redis-cli", "--rdb", "/tmp/dump.rdb", "SAVE")
+	default:
+		a.emit(protocol.EvtBackupResult, protocol.BackupResult{
+			RequestID: req.RequestID, DatabaseID: req.DatabaseID, Error: "unsupported engine: " + req.Engine,
+		})
+		return
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		a.emit(protocol.EvtBackupResult, protocol.BackupResult{
+			RequestID: req.RequestID, DatabaseID: req.DatabaseID, Error: "backup: " + err.Error(),
+		})
+		return
+	}
+	a.emit(protocol.EvtBackupResult, protocol.BackupResult{
+		RequestID: req.RequestID, DatabaseID: req.DatabaseID, Size: int64(len(out)), Data: string(out),
+	})
+}

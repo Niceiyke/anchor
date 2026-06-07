@@ -9,6 +9,7 @@ interface SettingsStatus {
   github_app_configured: boolean;
   github_app_installed: boolean;
   github_app_slug: string;
+  notification_webhook_set: boolean;
 }
 
 export function Settings() {
@@ -18,8 +19,6 @@ export function Settings() {
   const [ghError, setGhError] = useState("");
   const [connecting, setConnecting] = useState(false);
 
-  // Fetch the app manifest over the authenticated XHR path, then submit a form
-  // to GitHub to start the create-app flow.
   async function connectGitHubApp() {
     setGhError("");
     setConnecting(true);
@@ -43,21 +42,14 @@ export function Settings() {
 
   const saveToken = useMutation({
     mutationFn: () => api.put("/api/settings", { github_token: token }),
-    onSuccess: () => {
-      setToken("");
-      qc.invalidateQueries({ queryKey: ["settings"] });
-      qc.invalidateQueries({ queryKey: ["repos"] });
-    },
+    onSuccess: () => { setToken(""); qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["repos"] }); },
   });
 
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwMsg, setPwMsg] = useState("");
   const changePw = useMutation({
     mutationFn: () => api.post("/api/account/password", { current_password: pw.current, new_password: pw.next }),
-    onSuccess: () => {
-      setPw({ current: "", next: "", confirm: "" });
-      setPwMsg("Password updated.");
-    },
+    onSuccess: () => { setPw({ current: "", next: "", confirm: "" }); setPwMsg("Password updated."); },
     onError: (e) => setPwMsg((e as Error).message),
   });
 
@@ -104,6 +96,12 @@ export function Settings() {
       </div>
 
       <div className="card">
+        <strong>Notifications</strong>
+        <p className="muted">Receive deploy status alerts via Slack or Discord webhook.</p>
+        <NotificationSection configured={data?.notification_webhook_set ?? false} onSaved={() => qc.invalidateQueries({ queryKey: ["settings"] })} />
+      </div>
+
+      <div className="card">
         <strong>Webhook</strong>
         <p className="muted">
           With a GitHub App the webhook is configured automatically. For PAT mode,
@@ -133,6 +131,88 @@ export function Settings() {
         {pw.next && pw.confirm && pw.next !== pw.confirm && <div className="error">Passwords don't match.</div>}
         {pwMsg && <div className={changePw.isError ? "error" : "muted"} style={changePw.isSuccess ? { color: "var(--green)" } : undefined}>{pwMsg}</div>}
       </div>
+
+      <UserSection />
     </>
+  );
+}
+
+function NotificationSection({ configured, onSaved }: { configured: boolean; onSaved: () => void }) {
+  const [url, setUrl] = useState("");
+  const [msg, setMsg] = useState("");
+  const save = useMutation({
+    mutationFn: () => api.put("/api/settings", { notification_webhook: url }),
+    onSuccess: () => { setUrl(""); setMsg("Saved."); onSaved(); },
+    onError: (e) => setMsg((e as Error).message),
+  });
+  const clear = useMutation({
+    mutationFn: () => api.put("/api/settings", { notification_webhook: "" }),
+    onSuccess: () => { setMsg("Removed."); onSaved(); },
+  });
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="row">
+        <input type="text" placeholder="https://hooks.slack.com/…" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <button className="btn" disabled={!url || save.isPending} onClick={() => { setMsg(""); save.mutate(); }}>Save</button>
+        {configured && <button className="btn secondary" onClick={() => { setMsg(""); clear.mutate(); }}>Remove</button>}
+      </div>
+      {configured && !url && <div className="muted" style={{ marginTop: 4 }}><span className="dot on" /> Webhook configured</div>}
+      {msg && <div className={save.isError || clear.isError ? "error" : "muted"} style={save.isSuccess ? { color: "var(--green)" } : { marginTop: 4 }}>{msg}</div>}
+    </div>
+  );
+}
+
+interface User {
+  id: string;
+  username: string;
+  role: string;
+  created_at: string;
+}
+
+function UserSection() {
+  const qc = useQueryClient();
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/api/users") });
+  const [form, setForm] = useState({ username: "", password: "", role: "viewer" });
+
+  const create = useMutation({
+    mutationFn: () => api.post<User>("/api/users", form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["users"] }); setForm({ username: "", password: "", role: "viewer" }); },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/users/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+
+  return (
+    <div className="card">
+      <strong>Users</strong>
+      <p className="muted">Manage who can access Anchor. Admins have full access; viewers are read-only.</p>
+
+      <div className="row" style={{ marginTop: 10, gap: 8 }}>
+        <input placeholder="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} style={{ flex: 2 }} />
+        <input type="password" placeholder="Password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} style={{ flex: 2 }} />
+        <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={{ flex: 1 }}>
+          <option value="viewer">Viewer</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button className="btn" disabled={!form.username || !form.password || create.isPending} onClick={() => create.mutate()}>
+          {create.isPending ? "Adding…" : "Add"}
+        </button>
+      </div>
+      {create.isError && <div className="error">{(create.error as Error).message}</div>}
+
+      <div style={{ marginTop: 14 }}>
+        {users.map((u) => (
+          <div className="row" key={u.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+            <span><b>{u.username}</b> <span className="badge" style={{ marginLeft: 6 }}>{u.role}</span></span>
+            <span className="muted" style={{ fontSize: 12 }}>{new Date(u.created_at).toLocaleDateString()}</span>
+            <button className="btn secondary" onClick={() => { if (confirm(`Delete user "${u.username}"?`)) remove.mutate(u.id); }}>Remove</button>
+          </div>
+        ))}
+        {users.length === 0 && <div className="muted">No additional users. The bootstrap admin is always available.</div>}
+      </div>
+    </div>
   );
 }

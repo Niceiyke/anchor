@@ -1,4 +1,4 @@
-.PHONY: help cp agent agent-linux web run dev tidy clean
+.PHONY: help cp agent agent-linux web run dev test tidy clean
 
 help:
 	@echo "Anchor make targets:"
@@ -8,6 +8,7 @@ help:
 	@echo "  make agent       build agent binary         -> bin/anchor-agent"
 	@echo "  make agent-linux build linux/amd64 agent    -> bin/anchor-agent-linux"
 	@echo "  make web         build the web UI           -> web/dist"
+	@echo "  make test        run Go tests"
 
 cp:
 	go build -o bin/anchor-cp ./cmd/control-plane
@@ -26,6 +27,9 @@ run: web cp
 
 dev: cp
 	./bin/anchor-cp
+
+test:
+	go test ./...
 
 tidy:
 	go mod tidy

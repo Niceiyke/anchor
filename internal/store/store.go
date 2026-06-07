@@ -40,6 +40,28 @@ type Stats struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// ServerStat is a single time-series data point for server metrics.
+type ServerStat struct {
+	ServerID   string    `json:"server_id"`
+	CPUPercent float64   `json:"cpu_percent"`
+	MemUsed    uint64    `json:"mem_used"`
+	MemTotal   uint64    `json:"mem_total"`
+	DiskUsed   uint64    `json:"disk_used"`
+	DiskTotal  uint64    `json:"disk_total"`
+	Containers int       `json:"containers"`
+	Load1      float64   `json:"load_1"`
+	At         time.Time `json:"at"`
+}
+
+// User represents an admin user with a role.
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash"`
+	Role         string    `json:"role"` // admin | viewer
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 // App is a deployable project bound to a GitHub repo and a target server.
 type App struct {
 	ID            string            `json:"id"`
@@ -52,6 +74,7 @@ type App struct {
 	ContainerPort int               `json:"container_port"`
 	AutoDeploy    bool              `json:"auto_deploy"`
 	EnvVars       map[string]string `json:"env_vars"`
+	LastGoodSHA   string            `json:"last_good_sha,omitempty"` // for rollbacks
 	CreatedAt     time.Time         `json:"created_at"`
 }
 
@@ -112,6 +135,9 @@ type Settings struct {
 	GitHubClientID         string `json:"github_client_id"`
 	GitHubClientSecret     string `json:"github_client_secret"`
 	GitHubInstallationID   int64  `json:"github_installation_id"`
+
+	// Notification webhook (Slack/Discord).
+	NotificationWebhook string `json:"notification_webhook"`
 }
 
 // GitHubAppConfigured reports whether a GitHub App is fully set up.
@@ -143,6 +169,7 @@ type Store interface {
 	GetDeployment(id string) (Deployment, error)
 	CreateDeployment(Deployment) error
 	UpdateDeployment(Deployment) error
+	AppendDeploymentLog(deploymentID string, line LogLine) error
 
 	ListDatabases() ([]Database, error)
 	GetDatabase(id string) (Database, error)
@@ -155,6 +182,17 @@ type Store interface {
 	GetSession(token string) (time.Time, error)
 	DeleteSession(token string) error
 	DeleteExpiredSessions(now time.Time) error
+
+	// Server stats (time series).
+	InsertServerStat(ServerStat) error
+	ServerStats(serverID string, since time.Time, limit int) ([]ServerStat, error)
+
+	// Users (multi-user).
+	ListUsers() ([]User, error)
+	GetUser(id string) (User, error)
+	GetUserByUsername(username string) (User, error)
+	CreateUser(User) error
+	DeleteUser(id string) error
 }
 
 // ---- JSON file implementation ---------------------------------------------
@@ -388,6 +426,21 @@ func (s *jsonStore) UpdateDeployment(v Deployment) error {
 	return s.flush()
 }
 
+func (s *jsonStore) AppendDeploymentLog(deploymentID string, line LogLine) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dep, ok := s.d.Deployments[deploymentID]
+	if !ok {
+		return ErrNotFound
+	}
+	dep.Logs = append(dep.Logs, line)
+	if len(dep.Logs) > 5000 {
+		dep.Logs = dep.Logs[len(dep.Logs)-5000:]
+	}
+	s.d.Deployments[deploymentID] = dep
+	return s.flush()
+}
+
 func (s *jsonStore) ListDatabases() ([]Database, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -472,3 +525,11 @@ func (s *jsonStore) DeleteExpiredSessions(now time.Time) error {
 	}
 	return nil
 }
+
+func (s *jsonStore) InsertServerStat(ServerStat) error       { return nil }
+func (s *jsonStore) ServerStats(string, time.Time, int) ([]ServerStat, error) { return nil, nil }
+func (s *jsonStore) ListUsers() ([]User, error)               { return nil, nil }
+func (s *jsonStore) GetUser(string) (User, error)             { return User{}, ErrNotFound }
+func (s *jsonStore) GetUserByUsername(string) (User, error)   { return User{}, ErrNotFound }
+func (s *jsonStore) CreateUser(User) error                    { return nil }
+func (s *jsonStore) DeleteUser(string) error                  { return nil }

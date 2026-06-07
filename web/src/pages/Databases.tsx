@@ -89,7 +89,29 @@ export function Databases() {
 
 function DatabaseCard({ db, onDelete }: { db: Database; onDelete: () => void }) {
   const [show, setShow] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   const engine = ENGINES.find((e) => e.id === db.engine);
+
+  async function backup() {
+    if (!confirm(`Backup "${db.name}"? The dump file will be downloaded.`)) return;
+    setBackingUp(true);
+    try {
+      const res = await fetch(`/api/databases/${db.id}/backup`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup-${db.name}-${new Date().toISOString().slice(0, 10)}.sql`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBackingUp(false);
+    }
+  }
+
   return (
     <div className="card">
       <div className="row">
@@ -121,7 +143,12 @@ function DatabaseCard({ db, onDelete }: { db: Database; onDelete: () => void }) 
         </table>
       </details>
 
-      <button className="btn danger" style={{ marginTop: 12 }} onClick={onDelete}>Delete</button>
+      <div className="row" style={{ marginTop: 12, gap: 8 }}>
+        <button className="btn secondary" onClick={backup} disabled={backingUp || db.status !== "running"}>
+          {backingUp ? "Backing up…" : "Backup"}
+        </button>
+        <button className="btn danger" onClick={onDelete}>Delete</button>
+      </div>
     </div>
   );
 }

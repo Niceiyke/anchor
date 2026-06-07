@@ -11,7 +11,7 @@ function gb(n = 0) {
 
 export function Servers() {
   const qc = useQueryClient();
-  const { data: servers = [] } = useQuery({
+  const { data: servers = [], error } = useQuery({
     queryKey: ["servers"],
     queryFn: () => api.get<Server[]>("/api/servers"),
     refetchInterval: 5000,
@@ -34,6 +34,7 @@ export function Servers() {
     <>
       <div className="row">
         <h2>Servers</h2>
+        {error && <span className="badge failed">API unreachable — check connection</span>}
       </div>
 
       <div className="card">
@@ -41,6 +42,7 @@ export function Servers() {
           <input placeholder="New server name (e.g. prod-eu-1)" value={name} onChange={(e) => setName(e.target.value)} />
           <button className="btn" onClick={() => add.mutate()} disabled={!name || add.isPending}>Add server</button>
         </div>
+        {add.isError && <div className="error">{(add.error as Error).message}</div>}
         {created && (
           <div style={{ marginTop: 16 }}>
             <div className="muted">Run this on <b>{created.name}</b> to connect its agent (token shown once):</div>
@@ -58,6 +60,11 @@ ANCHOR_TOKEN=${created.agent_token} \\
               <strong>{s.name}</strong>
               <span className="muted"><span className={"dot " + (s.online ? "on" : "off")} />{s.online ? "online" : "offline"}</span>
             </div>
+            {!s.online && (
+              <div className="muted" style={{ fontSize: 12, color: "var(--yellow)", marginTop: 8 }}>
+                Agent disconnected. Deploy, terminal, and database operations are unavailable for this server.
+              </div>
+            )}
             {s.stats ? (
               <div style={{ marginTop: 10 }}>
                 <div className="muted">CPU {Math.round(s.stats.cpu_percent)}%</div>
@@ -73,7 +80,7 @@ ANCHOR_TOKEN=${created.agent_token} \\
             )}
           </div>
         ))}
-        {servers.length === 0 && <div className="muted">No servers yet. Add one above.</div>}
+        {!error && servers.length === 0 && <div className="muted">No servers yet. Add one above.</div>}
       </div>
     </>
   );
