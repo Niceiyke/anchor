@@ -306,7 +306,15 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
-	_ = s.store.DeleteApp(r.PathValue("id"))
+	id := r.PathValue("id")
+	// Best-effort: stop/remove the running container(s) on the agent so we don't
+	// orphan them, then delete the record.
+	if a, err := s.store.GetApp(id); err == nil {
+		payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name})
+		cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdStopApp, Data: payload}
+		s.hub.Send(a.ServerID, cmd) // best-effort; agent may be offline
+	}
+	_ = s.store.DeleteApp(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -316,7 +324,13 @@ func (s *Server) handleDeployApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	dep, err := s.triggerDeploy(a, "")
+	// Optional commit_sha lets the UI redeploy a specific past commit; empty
+	// means deploy the latest of the app's branch.
+	var body struct {
+		CommitSHA string `json:"commit_sha"`
+	}
+	_ = readJSON(r, &body)
+	dep, err := s.triggerDeploy(a, strings.TrimSpace(body.CommitSHA))
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "deployment_id": dep.ID})
 		return

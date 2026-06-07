@@ -175,6 +175,12 @@ func (a *Agent) dispatch(ctx context.Context, cmd protocol.Command) {
 			return
 		}
 		a.pruneImages(ctx, req)
+	case protocol.CmdSystemPrune:
+		var req protocol.SystemPruneRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.systemPrune(ctx, req)
 	case protocol.CmdBackupDB:
 		var req protocol.BackupDBRequest
 		if err := json.Unmarshal(cmd.Data, &req); err != nil {

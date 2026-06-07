@@ -146,10 +146,28 @@ Two options, in **Settings**:
 ## Deploy flow
 
 1. **Applications → Deploy a new app** — pick a repo, target server, branch,
-   domain, container port, and toggle auto-deploy.
+   domain, container port, optional compose file, and toggle auto-deploy.
 2. **Deploy now**, or push to the branch. Watch logs stream live.
 
 On push, every app bound to that repo+branch with auto-deploy redeploys.
+
+## Managing an app
+
+Open an app (**Applications → name**) for its full control surface:
+
+- **Deploy latest** — build & deploy the current HEAD of the branch.
+- **Redeploy** — re-run any past deployment's exact commit (button on each
+  deployment in the list). Empty/manual deployments redeploy latest.
+- **Rollback** — redeploy the last *successful* commit (shown when available).
+- **Stop** — stop & remove the app's container(s) (`compose down` / `rm -f`).
+- **Configuration** (collapsible) — edit branch, domain, container port,
+  compose file, and auto-deploy. Server and repo are immutable; changes apply
+  on the next deploy. (`PATCH /api/apps/{id}`)
+- **Environment & secrets** — add, edit, or remove env vars (values masked by
+  default; toggle to reveal). Attach a managed database to inject its
+  connection string. Variables are injected into the container on deploy.
+- **Danger zone → Delete app** — removes the app *and* stops/removes its
+  container(s) on the server. Also available as a row action on the Apps list.
 
 ## Terminal
 
@@ -158,14 +176,24 @@ On push, every app bound to that repo+branch with auto-deploy redeploys.
 Output is live-only (not persisted). Handy for `docker ps`, `df -h`, tailing,
 quick fixes.
 
-## Container Logs
+## Containers
 
-**Container Logs** lists every container on a server (`docker ps -a`) and
+**Containers** lists every container on a server (`docker ps -a`) and
 live-tails any one of them (`docker logs --timestamps -f`), streaming to the
 browser over SSE. The follow is cancellable — closing the view or hitting Pause
 sends a stop command so the agent kills the underlying `docker logs` process
 (no orphaned follows). Container listing uses a request/reply over the agent
 channel with an 8s timeout.
+
+Per-container lifecycle controls (**Start / Stop / Restart / Remove**) and
+cleanup actions are available on the same page:
+
+- **Prune exited** — remove stopped containers (`docker container prune`).
+- **Prune images** — remove dangling images (`docker image prune`; the API also
+  supports `?all=true` for all unused images).
+- **System prune** — `docker system prune`: stopped containers, unused networks,
+  dangling images, and build cache. **Volumes are never pruned**, so managed
+  database data is safe.
 
 ## Managed databases
 

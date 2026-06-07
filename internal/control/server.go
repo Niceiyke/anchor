@@ -171,6 +171,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/servers/{id}/containers", auth(s.handleListContainers))
 	s.mux.HandleFunc("POST /api/servers/{id}/containers/prune", authCSRF(s.handlePruneContainers))
 	s.mux.HandleFunc("POST /api/servers/{id}/images/prune", authCSRF(s.handlePruneImages))
+	s.mux.HandleFunc("POST /api/servers/{id}/system/prune", authCSRF(s.handleSystemPrune))
 	s.mux.HandleFunc("POST /api/servers/{id}/containers/{name}/{action}", authCSRF(s.handleContainerAction))
 	s.mux.HandleFunc("POST /api/servers/{id}/logs", authCSRF(s.handleStreamLogs))
 	s.mux.HandleFunc("DELETE /api/servers/{id}/logs/{rid}", authCSRF(s.handleStopLogs))

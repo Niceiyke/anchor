@@ -28,6 +28,7 @@ const (
 	CmdContainerAction CommandType = "container_action"
 	CmdPruneContainers CommandType = "prune_containers"
 	CmdPruneImages     CommandType = "prune_images"
+	CmdSystemPrune     CommandType = "system_prune"
 	CmdProvisionDB     CommandType = "provision_db"
 	CmdRemoveDB        CommandType = "remove_db"
 	CmdBackupDB        CommandType = "backup_db"
@@ -110,6 +111,14 @@ type PruneContainersRequest struct {
 type PruneImagesRequest struct {
 	RequestID string `json:"request_id"`
 	All       bool   `json:"all"`
+}
+
+// SystemPruneRequest is the payload for CmdSystemPrune (docker system prune):
+// stopped containers, unused networks, dangling images and build cache. Volumes
+// are never touched (they hold managed-database data). The reply is an
+// EvtCommandResult.
+type SystemPruneRequest struct {
+	RequestID string `json:"request_id"`
 }
 
 // ProvisionDBRequest is the payload for CmdProvisionDB. The control plane

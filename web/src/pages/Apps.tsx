@@ -45,6 +45,11 @@ export function Apps() {
     },
   });
 
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/apps/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
+  });
+
   function pickRepo(fullName: string) {
     const r = repos.find((x) => x.full_name === fullName);
     setForm((f) => ({
@@ -128,18 +133,28 @@ export function Apps() {
       </div>
 
       <table className="card" style={{ display: "table" }}>
-        <thead><tr><th>Name</th><th>Repo</th><th>Branch</th><th>Domain</th><th>Auto</th></tr></thead>
+        <thead><tr><th>Name</th><th>Repo</th><th>Branch</th><th>Domain</th><th>Auto</th><th></th></tr></thead>
         <tbody>
           {apps.map((a) => (
             <tr key={a.id}>
               <td><Link to="/apps/$appId" params={{ appId: a.id }}>{a.name}</Link></td>
               <td className="muted">{a.repo_full_name || a.repo_url}</td>
               <td>{a.branch}</td>
-              <td className="muted">{a.domain || "—"}</td>
+              <td className="muted">{a.domain ? <a href={`https://${a.domain}`} target="_blank" rel="noreferrer">{a.domain} ↗</a> : "—"}</td>
               <td>{a.auto_deploy ? "✓" : "—"}</td>
+              <td style={{ textAlign: "right" }}>
+                <button
+                  className="btn secondary"
+                  style={{ padding: "2px 8px", fontSize: 12 }}
+                  disabled={remove.isPending}
+                  onClick={() => { if (confirm(`Delete app "${a.name}"? Its container(s) will be stopped and removed.`)) remove.mutate(a.id); }}
+                >
+                  Delete
+                </button>
+              </td>
             </tr>
           ))}
-          {apps.length === 0 && <tr><td colSpan={5} className="muted">No apps yet.</td></tr>}
+          {apps.length === 0 && <tr><td colSpan={6} className="muted">No apps yet.</td></tr>}
         </tbody>
       </table>
     </>

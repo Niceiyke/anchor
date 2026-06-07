@@ -35,14 +35,14 @@ export function Logs() {
   const [pruneMsg, setPruneMsg] = useState("");
   const exitedCount = containers.filter((c) => c.state !== "running").length;
 
-  async function runPrune(kind: "containers" | "images", confirmText: string) {
+  async function runPrune(kind: "containers" | "images" | "system", confirmText: string) {
     if (!confirm(confirmText)) return;
     setPruneMsg("");
     setPruning(true);
     try {
       const res = await api.post<{ output: string }>(`/api/servers/${serverId}/${kind}/prune`);
       setPruneMsg(res.output?.split("\n").filter(Boolean).pop() || "Pruned.");
-      if (kind === "containers") {
+      if (kind === "containers" || kind === "system") {
         if (active && active.state !== "running") setActive(null);
         refetch();
       }
@@ -76,6 +76,14 @@ export function Logs() {
             title="Remove dangling images to reclaim disk space"
           >
             {pruning ? "Pruning…" : "Prune images"}
+          </button>
+          <button
+            className="btn secondary"
+            onClick={() => runPrune("system", "Run system prune? Removes stopped containers, unused networks, dangling images and build cache. Volumes (database data) are NOT touched.")}
+            disabled={pruning || !serverId}
+            title="docker system prune — containers, networks, dangling images, build cache (never volumes)"
+          >
+            {pruning ? "Pruning…" : "System prune"}
           </button>
           <button className="btn secondary" onClick={() => refetch()} disabled={isFetching}>↻</button>
         </div>
