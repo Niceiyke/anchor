@@ -19,17 +19,18 @@ const ProtocolVersion = 1
 type CommandType string
 
 const (
-	CmdDeploy         CommandType = "deploy"
-	CmdRunCommand     CommandType = "run_command"
-	CmdStreamLogs     CommandType = "stream_logs"
-	CmdStopStream     CommandType = "stop_stream"
-	CmdListContainers CommandType = "list_containers"
-	CmdStopApp        CommandType = "stop_app"
-	CmdProvisionDB    CommandType = "provision_db"
-	CmdRemoveDB       CommandType = "remove_db"
-	CmdBackupDB       CommandType = "backup_db"
-	CmdPing           CommandType = "ping"
-	CmdHello          CommandType = "hello"
+	CmdDeploy          CommandType = "deploy"
+	CmdRunCommand      CommandType = "run_command"
+	CmdStreamLogs      CommandType = "stream_logs"
+	CmdStopStream      CommandType = "stop_stream"
+	CmdListContainers  CommandType = "list_containers"
+	CmdStopApp         CommandType = "stop_app"
+	CmdContainerAction CommandType = "container_action"
+	CmdProvisionDB     CommandType = "provision_db"
+	CmdRemoveDB        CommandType = "remove_db"
+	CmdBackupDB        CommandType = "backup_db"
+	CmdPing            CommandType = "ping"
+	CmdHello           CommandType = "hello"
 )
 
 // Command is a single instruction pushed to an agent over the stream.
@@ -83,6 +84,15 @@ type ListContainersRequest struct {
 // StopAppRequest is the payload for CmdStopApp.
 type StopAppRequest struct {
 	AppName string `json:"app_name"`
+}
+
+// ContainerActionRequest is the payload for CmdContainerAction. The reply is an
+// EvtCommandResult carrying the exit code and any output. Action is one of
+// start | stop | restart | remove.
+type ContainerActionRequest struct {
+	RequestID string `json:"request_id"`
+	Container string `json:"container"`
+	Action    string `json:"action"`
 }
 
 // ProvisionDBRequest is the payload for CmdProvisionDB. The control plane

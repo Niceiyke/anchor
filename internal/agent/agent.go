@@ -157,6 +157,12 @@ func (a *Agent) dispatch(ctx context.Context, cmd protocol.Command) {
 			return
 		}
 		a.stopApp(ctx, req)
+	case protocol.CmdContainerAction:
+		var req protocol.ContainerActionRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.containerAction(ctx, req)
 	case protocol.CmdBackupDB:
 		var req protocol.BackupDBRequest
 		if err := json.Unmarshal(cmd.Data, &req); err != nil {
