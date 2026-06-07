@@ -11,10 +11,10 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -57,10 +57,28 @@ func baseURL(r *http.Request) string {
 
 // handleGitHubAppManifest renders an auto-submitting form that POSTs an app
 // manifest to GitHub, kicking off the create-app flow.
+//
+// Returns JSON {action, manifest}. The SPA fetches this over its authenticated
+// XHR path (cookie auth that's already known to work), then builds and submits
+// the form to GitHub itself — more reliable than depending on a session cookie
+// being sent on a full-page <a> navigation.
 func (s *Server) handleGitHubAppManifest(w http.ResponseWriter, r *http.Request) {
 	base := baseURL(r)
+
+	// GitHub App names are globally unique; derive from the host to avoid
+	// "name already taken" collisions. The user can still rename on GitHub.
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+	host = strings.TrimPrefix(host, "anchor.") // avoid "Anchor anchor ..."
+	name := "Anchor " + strings.NewReplacer(".", " ", ":", " ").Replace(host)
+	if len(name) > 34 {
+		name = name[:34]
+	}
+
 	manifest := map[string]any{
-		"name":            "Anchor Deploy",
+		"name":            name,
 		"url":             base,
 		"public":          false,
 		"redirect_url":    base + "/api/github/app/callback",
@@ -78,17 +96,10 @@ func (s *Server) handleGitHubAppManifest(w http.ResponseWriter, r *http.Request)
 	}
 	mb, _ := json.Marshal(manifest)
 
-	// org install target is optional; user can pick during creation
-	action := "https://github.com/settings/apps/new"
-	page := template.Must(template.New("m").Parse(`<!doctype html><html><body>
-<form id="f" method="post" action="{{.Action}}">
-  <input type="hidden" name="manifest" value='{{.Manifest}}'>
-</form>
-<script>document.getElementById('f').submit()</script>
-Redirecting to GitHub…
-</body></html>`))
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = page.Execute(w, map[string]any{"Action": action, "Manifest": string(mb)})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"action":   "https://github.com/settings/apps/new",
+		"manifest": string(mb),
+	})
 }
 
 // handleGitHubAppCallback exchanges the temporary manifest code for the app's

@@ -15,6 +15,31 @@ export function Settings() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["settings"], queryFn: () => api.get<SettingsStatus>("/api/settings") });
   const [token, setToken] = useState("");
+  const [ghError, setGhError] = useState("");
+  const [connecting, setConnecting] = useState(false);
+
+  // Fetch the app manifest over the authenticated XHR path, then submit a form
+  // to GitHub to start the create-app flow.
+  async function connectGitHubApp() {
+    setGhError("");
+    setConnecting(true);
+    try {
+      const { action, manifest } = await api.get<{ action: string; manifest: string }>("/api/github/app/manifest");
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = action;
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "manifest";
+      input.value = manifest;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+    } catch (e) {
+      setGhError((e as Error).message || "Failed to start GitHub App setup");
+      setConnecting(false);
+    }
+  }
 
   const saveToken = useMutation({
     mutationFn: () => api.put("/api/settings", { github_token: token }),
@@ -46,15 +71,16 @@ export function Settings() {
                 <a href={`https://github.com/apps/${data.github_app_slug}/installations/new`}>install it</a>
               )}
             </div>
-            <a className="btn secondary" style={{ marginTop: 12, display: "inline-block" }} href="/api/github/app/manifest">
-              Re-create app
-            </a>
+            <button className="btn secondary" style={{ marginTop: 12 }} disabled={connecting} onClick={connectGitHubApp}>
+              {connecting ? "Opening GitHub…" : "Re-create app"}
+            </button>
           </div>
         ) : (
-          <a className="btn" style={{ display: "inline-block" }} href="/api/github/app/manifest">
-            Connect GitHub App
-          </a>
+          <button className="btn" disabled={connecting} onClick={connectGitHubApp}>
+            {connecting ? "Opening GitHub…" : "Connect GitHub App"}
+          </button>
         )}
+        {ghError && <div className="error">{ghError}</div>}
       </div>
 
       <div className="card">
