@@ -27,6 +27,7 @@ const (
 	CmdStopApp         CommandType = "stop_app"
 	CmdContainerAction CommandType = "container_action"
 	CmdPruneContainers CommandType = "prune_containers"
+	CmdPruneImages     CommandType = "prune_images"
 	CmdProvisionDB     CommandType = "provision_db"
 	CmdRemoveDB        CommandType = "remove_db"
 	CmdBackupDB        CommandType = "backup_db"
@@ -101,6 +102,14 @@ type ContainerActionRequest struct {
 // whose output is docker's prune summary.
 type PruneContainersRequest struct {
 	RequestID string `json:"request_id"`
+}
+
+// PruneImagesRequest is the payload for CmdPruneImages. By default it removes
+// only dangling images; All also removes images not used by any container
+// (docker image prune -a). The reply is an EvtCommandResult.
+type PruneImagesRequest struct {
+	RequestID string `json:"request_id"`
+	All       bool   `json:"all"`
 }
 
 // ProvisionDBRequest is the payload for CmdProvisionDB. The control plane

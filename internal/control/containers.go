@@ -91,6 +91,36 @@ func (s *Server) handlePruneContainers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.awaitPruneResult(w, r, ch, "prune failed")
+}
+
+// handlePruneImages removes dangling images on the server's agent (or all
+// unused images when ?all=true) and returns docker's prune summary.
+func (s *Server) handlePruneImages(w http.ResponseWriter, r *http.Request) {
+	serverID := r.PathValue("id")
+	if _, err := s.store.GetServer(serverID); err != nil {
+		http.Error(w, "server not found", http.StatusNotFound)
+		return
+	}
+	all := r.URL.Query().Get("all") == "true"
+
+	reqID := "ip_" + randToken()[:12]
+	ch, cancel := s.awaitReply(reqID)
+	defer cancel()
+
+	payload, _ := json.Marshal(protocol.PruneImagesRequest{RequestID: reqID, All: all})
+	cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdPruneImages, Data: payload}
+	if !s.hub.Send(serverID, cmd) {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+
+	s.awaitPruneResult(w, r, ch, "prune failed")
+}
+
+// awaitPruneResult blocks on a prune reply and writes the docker summary, or an
+// error/timeout. Shared by the container and image prune handlers.
+func (s *Server) awaitPruneResult(w http.ResponseWriter, r *http.Request, ch <-chan protocol.Event, failMsg string) {
 	select {
 	case evt := <-ch:
 		var res protocol.CommandResult
@@ -98,7 +128,7 @@ func (s *Server) handlePruneContainers(w http.ResponseWriter, r *http.Request) {
 		if res.ExitCode != 0 {
 			msg := res.Output
 			if msg == "" {
-				msg = "prune failed"
+				msg = failMsg
 			}
 			http.Error(w, msg, http.StatusBadGateway)
 			return
