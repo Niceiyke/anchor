@@ -144,7 +144,14 @@ func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, a
 	project := sanitize(req.AppName)
 	args = append(args, "-p", project, "up", "-d", "--build", "--remove-orphans")
 	a.emitStatus(req.DeploymentID, protocol.PhaseStarting, "Starting services", string(stackCompose))
-	return a.run(ctx, req.DeploymentID, appDir, "docker", args...)
+	if err := a.run(ctx, req.DeploymentID, appDir, "docker", args...); err != nil {
+		return err
+	}
+	// Make the web service reachable by Caddy on anchor_net (no compose edits).
+	if req.Domain != "" {
+		a.attachComposeToNetwork(ctx, req)
+	}
+	return nil
 }
 
 // deployDockerfile builds an image and runs a single container, replacing any

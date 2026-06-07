@@ -261,8 +261,12 @@ Each VPS runs Caddy on `anchor_net`. On deploy the agent writes
 and reloads Caddy, which provisions TLS automatically. Point the domain's DNS at
 the VPS and it's live.
 
-> For `docker-compose` apps, attach the public-facing service to the external
-> `anchor_net` network (and name it to match the app) so Caddy can reach it.
+For `docker-compose` apps, the agent **auto-attaches** the web container to
+`anchor_net` with the app-name alias after `compose up` — no compose edits
+needed. It picks the service that exposes the app's **container port** (or the
+sole service); with multiple services and none exposing the port, it logs a hint
+to add `expose: ["<port>"]` to the web service. Make sure the app binds
+`0.0.0.0:<port>` (not `127.0.0.1`).
 
 ## Security
 
