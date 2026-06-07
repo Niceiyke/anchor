@@ -153,7 +153,8 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		PublicIP string `json:"public_ip"`
 	}
 	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Name) == "" {
 		http.Error(w, "name required", http.StatusBadRequest)
@@ -161,8 +162,9 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	srv := store.Server{
 		ID:         "srv_" + randToken()[:12],
-		Name:       body.Name,
+		Name:       strings.TrimSpace(body.Name),
 		AgentToken: randToken(),
+		PublicIP:   strings.TrimSpace(body.PublicIP),
 		CreatedAt:  time.Now(),
 	}
 	if err := s.store.CreateServer(srv); err != nil {
@@ -171,6 +173,39 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	// Return the token ONCE so the user can configure the agent.
 	writeJSON(w, http.StatusCreated, srv)
+}
+
+// handleUpdateServer edits a server's name and/or public IP (partial).
+func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
+	srv, err := s.store.GetServer(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Name     *string `json:"name"`
+		PublicIP *string `json:"public_ip"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Name != nil {
+		if strings.TrimSpace(*body.Name) == "" {
+			http.Error(w, "name cannot be empty", http.StatusBadRequest)
+			return
+		}
+		srv.Name = strings.TrimSpace(*body.Name)
+	}
+	if body.PublicIP != nil {
+		srv.PublicIP = strings.TrimSpace(*body.PublicIP)
+	}
+	if err := s.store.UpdateServer(srv); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	srv.AgentToken = "" // never leak
+	writeJSON(w, http.StatusOK, srv)
 }
 
 func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
@@ -245,7 +280,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go s.cfEnsureDomain(a.Domain) // best-effort Cloudflare A record
+	go s.cfEnsureDomain(a.Domain, a.ServerID) // best-effort Cloudflare A record
 	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusCreated, a)
 }
@@ -318,7 +353,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		if oldDomain != "" {
 			go s.cfDeleteDomain(oldDomain)
 		}
-		go s.cfEnsureDomain(a.Domain)
+		go s.cfEnsureDomain(a.Domain, a.ServerID)
 	}
 	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusOK, a)

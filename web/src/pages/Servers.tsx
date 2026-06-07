@@ -17,13 +17,14 @@ export function Servers() {
     refetchInterval: 5000,
   });
   const [name, setName] = useState("");
+  const [ip, setIp] = useState("");
   const [created, setCreated] = useState<Server | null>(null);
 
   const add = useMutation({
-    mutationFn: () => api.post<Server>("/api/servers", { name }),
+    mutationFn: () => api.post<Server>("/api/servers", { name, public_ip: ip.trim() }),
     onSuccess: (s) => {
       setCreated(s);
-      setName("");
+      setName(""); setIp("");
       qc.invalidateQueries({ queryKey: ["servers"] });
     },
   });
@@ -38,8 +39,9 @@ export function Servers() {
       </div>
 
       <div className="card">
-        <div className="row">
-          <input placeholder="New server name (e.g. prod-eu-1)" value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="row" style={{ gap: 8 }}>
+          <input style={{ flex: 2 }} placeholder="New server name (e.g. prod-eu-1)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input style={{ flex: 1 }} placeholder="Public IP (optional, for DNS)" value={ip} onChange={(e) => setIp(e.target.value)} />
           <button className="btn" onClick={() => add.mutate()} disabled={!name || add.isPending}>Add server</button>
         </div>
         {add.isError && <div className="error">{(add.error as Error).message}</div>}
@@ -60,6 +62,7 @@ ANCHOR_TOKEN=${created.agent_token} \\
               <strong>{s.name}</strong>
               <span className="muted"><span className={"dot " + (s.online ? "on" : "off")} />{s.online ? "online" : "offline"}</span>
             </div>
+            <ServerIP server={s} onSaved={() => qc.invalidateQueries({ queryKey: ["servers"] })} />
             {!s.online && (
               <div className="muted" style={{ fontSize: 12, color: "var(--yellow)", marginTop: 8 }}>
                 Agent disconnected. Deploy, terminal, and database operations are unavailable for this server.
@@ -83,5 +86,29 @@ ANCHOR_TOKEN=${created.agent_token} \\
         {!error && servers.length === 0 && <div className="muted">No servers yet. Add one above.</div>}
       </div>
     </>
+  );
+}
+
+function ServerIP({ server, onSaved }: { server: Server; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [ip, setIp] = useState(server.public_ip ?? "");
+  const save = useMutation({
+    mutationFn: () => api.patch(`/api/servers/${server.id}`, { public_ip: ip.trim() }),
+    onSuccess: () => { setEditing(false); onSaved(); },
+  });
+  if (!editing) {
+    return (
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        IP: {server.public_ip ? <code>{server.public_ip}</code> : <span>not set</span>}{" "}
+        <a href="#" onClick={(e) => { e.preventDefault(); setIp(server.public_ip ?? ""); setEditing(true); }}>edit</a>
+      </div>
+    );
+  }
+  return (
+    <div className="row" style={{ gap: 6, marginTop: 6 }}>
+      <input style={{ fontSize: 12, padding: "2px 6px" }} placeholder="203.0.113.10" value={ip} onChange={(e) => setIp(e.target.value)} />
+      <button className="btn secondary" style={{ padding: "2px 8px", fontSize: 12 }} disabled={save.isPending} onClick={() => save.mutate()}>Save</button>
+      <button className="btn secondary" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => setEditing(false)}>Cancel</button>
+    </div>
   );
 }

@@ -23,7 +23,8 @@ var ErrNotFound = errors.New("not found")
 type Server struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
-	AgentToken string    `json:"agent_token"` // bearer token the agent presents
+	AgentToken string    `json:"agent_token"`         // bearer token the agent presents
+	PublicIP   string    `json:"public_ip,omitempty"` // for DNS records of apps on this server
 	Online     bool      `json:"online"`
 	LastSeen   time.Time `json:"last_seen"`
 	Stats      *Stats    `json:"stats,omitempty"`

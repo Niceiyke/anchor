@@ -237,6 +237,20 @@ function EnvSection({ app }: { app: App }) {
   // a var is secret unless explicitly marked plain (false) — safe default
   const isSecret = (k: string) => app.env_secret?.[k] !== false;
 
+  // bulk .env import
+  const [importText, setImportText] = useState("");
+  const [importSecret, setImportSecret] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
+  const importEnv = useMutation({
+    mutationFn: () => api.post<{ imported: number }>(`/api/apps/${app.id}/env/import`, { content: importText, secret: importSecret }),
+    onSuccess: (res) => { setNotice(`Imported ${res.imported} variable(s). Redeploy to apply.`); setImportText(""); refresh(); },
+  });
+  function onDropFile(e: React.DragEvent) {
+    e.preventDefault(); setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) file.text().then((t) => setImportText((prev) => (prev ? prev + "\n" : "") + t));
+  }
+
   const selectedDb = sameServerDBs.find((d) => d.id === dbId);
   const suggestedVar = selectedDb ? (selectedDb.engine === "redis" ? "REDIS_URL" : "DATABASE_URL") : "";
 
@@ -335,6 +349,36 @@ function EnvSection({ app }: { app: App }) {
         </label>
         {setVar.isError && <div className="error" style={{ marginTop: 6 }}>{(setVar.error as Error).message}</div>}
       </div>
+
+      <details style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
+        <summary style={{ cursor: "pointer" }}>Bulk import from .env</summary>
+        <p className="muted" style={{ marginTop: 8 }}>Paste a <code>.env</code> block or drop a file. Comments and blank lines are ignored; existing keys are overwritten.</p>
+        <textarea
+          value={importText}
+          onChange={(e) => setImportText(e.target.value)}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDropFile}
+          placeholder={"# paste or drop a .env file\nDATABASE_URL=postgres://…\nJWT_SECRET=…"}
+          spellCheck={false}
+          style={{
+            width: "100%", minHeight: 120, fontFamily: "ui-monospace, monospace", fontSize: 13,
+            padding: 10, borderRadius: 6,
+            border: "1px dashed " + (dragOver ? "var(--green)" : "var(--border)"),
+            background: dragOver ? "rgba(63,185,80,0.06)" : undefined,
+          }}
+        />
+        <div className="row" style={{ marginTop: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" style={{ width: "auto" }} checked={importSecret} onChange={(e) => setImportSecret(e.target.checked)} />
+            Import as secrets
+          </label>
+          <button className="btn" disabled={!importText.trim() || importEnv.isPending} onClick={() => { setNotice(""); importEnv.mutate(); }}>
+            {importEnv.isPending ? "Importing…" : "Import variables"}
+          </button>
+        </div>
+        {importEnv.isError && <div className="error" style={{ marginTop: 6 }}>{(importEnv.error as Error).message}</div>}
+      </details>
 
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
         <label>Attach a database</label>

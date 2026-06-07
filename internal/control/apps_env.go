@@ -98,6 +98,93 @@ func (s *Server) handleSetEnv(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app)
 }
 
+// parseDotenv parses a .env-style blob into key/value pairs. It tolerates
+// comments (# ...), blank lines, section banners, optional `export `, and
+// surrounding single/double quotes; values may contain '=' (only the first '='
+// splits). Keys must be valid env identifiers; invalid lines are skipped.
+func parseDotenv(content string) map[string]string {
+	out := map[string]string{}
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		eq := strings.IndexByte(line, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eq])
+		val := strings.TrimSpace(line[eq+1:])
+		if !validEnvKey(key) {
+			continue
+		}
+		// strip a matching pair of surrounding quotes
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
+			val = val[1 : len(val)-1]
+		}
+		out[key] = val
+	}
+	return out
+}
+
+func validEnvKey(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i, r := range k {
+		isLetter := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_'
+		isDigit := r >= '0' && r <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
+}
+
+// handleImportEnv bulk-imports env vars from a pasted .env blob, merging into
+// the app's existing vars. Imported vars default to secret (masked).
+func (s *Server) handleImportEnv(w http.ResponseWriter, r *http.Request) {
+	app, err := s.store.GetApp(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Content string `json:"content"`
+		Secret  *bool  `json:"secret"` // nil = secret
+	}
+	if err := readJSON(r, &body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	parsed := parseDotenv(body.Content)
+	if len(parsed) == 0 {
+		http.Error(w, "no valid KEY=VALUE pairs found", http.StatusBadRequest)
+		return
+	}
+	if app.EnvVars == nil {
+		app.EnvVars = map[string]string{}
+	}
+	if app.EnvSecret == nil {
+		app.EnvSecret = map[string]bool{}
+	}
+	secret := body.Secret == nil || *body.Secret
+	for k, v := range parsed {
+		app.EnvVars[k] = v
+		app.EnvSecret[k] = secret
+	}
+	if err := s.store.UpdateApp(app); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	app.ContainerName = protocol.Sanitize(app.Name)
+	writeJSON(w, http.StatusOK, map[string]any{"app": app, "imported": len(parsed)})
+}
+
 // handleDeleteEnv removes a single env var from an app.
 func (s *Server) handleDeleteEnv(w http.ResponseWriter, r *http.Request) {
 	app, err := s.store.GetApp(r.PathValue("id"))
