@@ -51,6 +51,7 @@ type DeployRequest struct {
 	Domain        string            `json:"domain"`    // public domain for Caddy routing
 	ContainerPort int               `json:"container_port"`
 	EnvVars       map[string]string `json:"env_vars"`
+	ComposeFile   string            `json:"compose_file,omitempty"` // explicit -f path; "" = auto-detect
 }
 
 // RunCommandRequest is the payload for CmdRunCommand.

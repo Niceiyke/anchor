@@ -64,6 +64,7 @@ export function AppDetail() {
       {app && (
         <div className="muted" style={{ marginBottom: 8 }}>
           {app.repo_full_name || app.repo_url} · {app.branch} · {app.domain || "no domain"} · port {app.container_port}
+          {app.compose_file && <span> · compose: <code>{app.compose_file}</code></span>}
           {app.last_good_sha && <span> · rollback: <code>{app.last_good_sha.slice(0, 7)}</code></span>}
         </div>
       )}

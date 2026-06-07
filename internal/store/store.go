@@ -75,6 +75,7 @@ type App struct {
 	ContainerPort int               `json:"container_port"`
 	AutoDeploy    bool              `json:"auto_deploy"`
 	EnvVars       map[string]string `json:"env_vars"`
+	ComposeFile   string            `json:"compose_file,omitempty"`  // explicit compose file path; "" = auto-detect
 	LastGoodSHA   string            `json:"last_good_sha,omitempty"` // for rollbacks
 	CreatedAt     time.Time         `json:"created_at"`
 }

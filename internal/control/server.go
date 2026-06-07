@@ -157,6 +157,7 @@ func (s *Server) routes() {
 
 	// --- GitHub ---
 	s.mux.HandleFunc("GET /api/github/repos", auth(s.handleGitHubRepos))
+	s.mux.HandleFunc("GET /api/github/compose-files", auth(s.handleListComposeFiles))
 	s.mux.HandleFunc("GET /api/github/app/manifest", auth(s.handleGitHubAppManifest))
 	s.mux.HandleFunc("GET /api/github/app/callback", auth(s.handleGitHubAppCallback))
 	s.mux.HandleFunc("GET /api/github/setup", auth(s.handleGitHubSetup))

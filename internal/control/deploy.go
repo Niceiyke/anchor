@@ -42,6 +42,7 @@ func (s *Server) triggerDeploy(app store.App, commitSHA string) (store.Deploymen
 		Domain:        app.Domain,
 		ContainerPort: app.ContainerPort,
 		EnvVars:       app.EnvVars,
+		ComposeFile:   app.ComposeFile,
 	}
 	payload, _ := json.Marshal(req)
 	cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdDeploy, Data: payload}

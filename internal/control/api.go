@@ -226,6 +226,11 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	if a.EnvVars == nil {
 		a.EnvVars = map[string]string{}
 	}
+	a.ComposeFile = strings.TrimSpace(a.ComposeFile)
+	if !validComposePath(a.ComposeFile) {
+		http.Error(w, "invalid compose file path", http.StatusBadRequest)
+		return
+	}
 	a.ID = "app_" + randToken()[:12]
 	a.CreatedAt = time.Now()
 	if err := s.store.CreateApp(a); err != nil {
