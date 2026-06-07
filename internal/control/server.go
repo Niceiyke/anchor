@@ -20,6 +20,7 @@ type Server struct {
 	mux          *http.ServeMux
 	ghTokenCache *tokenCache
 	limiter      *rateLimiter
+	cf           *cfClient
 
 	pendingMu sync.Mutex
 	pending   map[string]chan protocol.Event // requestID -> waiter (request/reply)
@@ -38,6 +39,7 @@ func New(st store.Store, adminUser, adminPass string) (*Server, error) {
 		mux:         http.NewServeMux(),
 		pending:     map[string]chan protocol.Event{},
 		limiter:     newRateLimiter(),
+		cf:          newCFClient(),
 		deployLocks: map[string]struct{}{},
 	}
 
@@ -220,6 +222,7 @@ func (s *Server) routes() {
 	// --- Settings ---
 	s.mux.HandleFunc("GET /api/settings", auth(s.handleGetSettings))
 	s.mux.HandleFunc("PUT /api/settings", authCSRF(s.handleUpdateSettings))
+	s.mux.HandleFunc("POST /api/cloudflare/verify", authCSRF(s.handleCloudflareVerify))
 
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
