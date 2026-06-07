@@ -179,6 +179,9 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 			return
 		}
 		s.broadcast(execTopic(cr.RequestID), evt)
+		// Also satisfy a synchronous waiter (e.g. container actions). No-op for
+		// terminal/log streams, which register no waiter.
+		s.deliverReply(cr.RequestID, evt)
 
 	case protocol.EvtContainerList:
 		var cl protocol.ContainerList

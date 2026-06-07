@@ -167,8 +167,9 @@ func (s *Server) routes() {
 	// --- Terminal / exec ---
 	s.mux.HandleFunc("POST /api/servers/{id}/exec", authCSRF(s.handleExec))
 
-	// --- Container logs ---
+	// --- Container logs + lifecycle ---
 	s.mux.HandleFunc("GET /api/servers/{id}/containers", auth(s.handleListContainers))
+	s.mux.HandleFunc("POST /api/servers/{id}/containers/{name}/{action}", authCSRF(s.handleContainerAction))
 	s.mux.HandleFunc("POST /api/servers/{id}/logs", authCSRF(s.handleStreamLogs))
 	s.mux.HandleFunc("DELETE /api/servers/{id}/logs/{rid}", authCSRF(s.handleStopLogs))
 

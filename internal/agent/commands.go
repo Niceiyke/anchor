@@ -121,6 +121,39 @@ func (a *Agent) listContainers(ctx context.Context, req protocol.ListContainersR
 	a.emit(protocol.EvtContainerList, list)
 }
 
+// containerAction performs a lifecycle operation on a single container and
+// replies with an EvtCommandResult (exit code + combined output).
+func (a *Agent) containerAction(ctx context.Context, req protocol.ContainerActionRequest) {
+	var args []string
+	switch req.Action {
+	case "start":
+		args = []string{"start", req.Container}
+	case "stop":
+		args = []string{"stop", req.Container}
+	case "restart":
+		args = []string{"restart", req.Container}
+	case "remove":
+		args = []string{"rm", "-f", req.Container}
+	default:
+		a.emit(protocol.EvtCommandResult, protocol.CommandResult{
+			RequestID: req.RequestID, ExitCode: -1, Output: "unknown action: " + req.Action,
+		})
+		return
+	}
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	exit := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exit = ee.ExitCode()
+		} else {
+			exit = -1
+		}
+	}
+	a.emit(protocol.EvtCommandResult, protocol.CommandResult{
+		RequestID: req.RequestID, ExitCode: exit, Output: strings.TrimSpace(string(out)),
+	})
+}
+
 // stopApp stops and removes an app's container(s).
 func (a *Agent) stopApp(ctx context.Context, req protocol.StopAppRequest) {
 	name := sanitize(req.AppName)

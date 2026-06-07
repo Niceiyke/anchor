@@ -35,7 +35,7 @@ export function Logs() {
   return (
     <>
       <div className="row">
-        <h2>Container Logs</h2>
+        <h2>Containers</h2>
         <div className="row" style={{ gap: 8 }}>
           <select style={{ width: 200 }} value={serverId} onChange={(e) => { setServerId(e.target.value); setActive(null); }}>
             {servers.map((s) => <option key={s.id} value={s.id} disabled={!s.online}>{s.name}{s.online ? "" : " (offline)"}</option>)}
@@ -60,6 +60,7 @@ export function Logs() {
               </div>
               <div className="muted">{c.image}</div>
               <div className="muted">{c.status}</div>
+              <ContainerActions serverId={serverId} container={c} onDone={() => refetch()} />
             </div>
           ))}
           {!isFetching && !error && containers.length === 0 && <div className="muted" style={{ padding: 8 }}>No containers.</div>}
@@ -68,6 +69,53 @@ export function Logs() {
         <div>{active ? <LogStream key={active.id + serverId} serverId={serverId} container={active} /> : <div className="muted">Select a container to tail its logs.</div>}</div>
       </div>
     </>
+  );
+}
+
+function ContainerActions({ serverId, container, onDone }: { serverId: string; container: Container; onDone: () => void }) {
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const running = container.state === "running";
+
+  async function run(action: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if ((action === "stop" || action === "remove") &&
+        !confirm(`${action === "remove" ? "Remove" : "Stop"} container "${container.name}"?`)) {
+      return;
+    }
+    setErr("");
+    setBusy(action);
+    try {
+      await api.post(`/api/servers/${serverId}/containers/${encodeURIComponent(container.name)}/${action}`);
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message || "action failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const Btn = ({ action, label, danger }: { action: string; label: string; danger?: boolean }) => (
+    <button
+      className={"btn " + (danger ? "danger" : "secondary")}
+      style={{ padding: "2px 8px", fontSize: 12 }}
+      disabled={!!busy}
+      onClick={(e) => run(action, e)}
+    >
+      {busy === action ? "…" : label}
+    </button>
+  );
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        {running
+          ? <><Btn action="restart" label="Restart" /><Btn action="stop" label="Stop" /></>
+          : <Btn action="start" label="Start" />}
+        <Btn action="remove" label="Remove" danger />
+      </div>
+      {err && <div className="error" style={{ fontSize: 12, marginTop: 4 }}>{err}</div>}
+    </div>
   );
 }
 
