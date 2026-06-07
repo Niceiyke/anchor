@@ -146,6 +146,10 @@ type Settings struct {
 
 	// Notification webhook (Slack/Discord).
 	NotificationWebhook string `json:"notification_webhook"`
+
+	// BaseDomain auto-assigns apps a subdomain (<slug>.<base_domain>) when no
+	// custom domain is set. Requires a wildcard DNS record (*.<base_domain>).
+	BaseDomain string `json:"base_domain"`
 }
 
 // GitHubAppConfigured reports whether a GitHub App is fully set up.

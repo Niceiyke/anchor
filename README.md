@@ -151,6 +151,24 @@ Two options, in **Settings**:
 
 On push, every app bound to that repo+branch with auto-deploy redeploys.
 
+## Auto-assigned domains
+
+Set a **Base domain** (Settings, or `ANCHOR_BASE_DOMAIN`), e.g. `apps.example.com`.
+Apps created without a custom domain then get `<slug>.<base>` automatically
+(`blog` → `blog.apps.example.com`), and Caddy issues HTTPS **on demand** on the
+first request — gated by an `ask` endpoint (`/tls/check`) so it only mints certs
+for domains Anchor manages.
+
+**One-time setup:** add a wildcard DNS record so the subdomains resolve to the
+box:
+
+```
+*.apps.example.com   A   <your VPS IP>
+```
+
+You can still type a custom domain per app to override the auto one (point its
+DNS at the server and it gets HTTPS the same way).
+
 ## Managing an app
 
 Open an app (**Applications → name**) for its full control surface:

@@ -7,6 +7,16 @@
 #   into /etc/caddy/apps (written by the agent), imported below. Caddy and the
 #   app containers share the anchor_net network, so it reaches them by name.
 
+# Global options: on-demand TLS lets Caddy issue a cert for an app domain
+# (including auto-assigned <slug>.<base_domain> subdomains) on first request.
+# The `ask` endpoint lets the control plane approve only domains Anchor manages,
+# so Caddy won't mint certs for arbitrary hostnames pointed at this server.
+{
+	on_demand_tls {
+		ask http://control-plane:8080/tls/check
+	}
+}
+
 {$ANCHOR_DOMAIN} {
 	reverse_proxy control-plane:8080
 }

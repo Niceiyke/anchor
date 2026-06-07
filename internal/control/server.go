@@ -114,6 +114,26 @@ func (s *Server) EnsureLocalServer(name, token string) error {
 	return nil
 }
 
+// EnsureBaseDomain seeds the base domain from the environment on first run,
+// unless it has already been configured (e.g. via the UI). Apps created without
+// a custom domain then get <slug>.<base_domain> automatically.
+func (s *Server) EnsureBaseDomain(d string) {
+	d = strings.ToLower(strings.Trim(strings.TrimSpace(d), "/."))
+	if d == "" {
+		return
+	}
+	settings, _ := s.store.Settings()
+	if settings.BaseDomain != "" {
+		return
+	}
+	settings.BaseDomain = d
+	if err := s.store.SaveSettings(settings); err != nil {
+		log.Printf("set base domain: %v", err)
+		return
+	}
+	log.Printf("base domain set to %q (apps without a domain get <slug>.%s)", d, d)
+}
+
 func (s *Server) routes() {
 	// Shortcut: auth only (safe) or auth + CSRF (mutating).
 	auth := s.requireAuth
@@ -163,6 +183,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/github/app/callback", auth(s.handleGitHubAppCallback))
 	s.mux.HandleFunc("GET /api/github/setup", auth(s.handleGitHubSetup))
 	s.mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
+
+	// --- On-demand TLS guard (called by Caddy, unauthenticated) ---
+	s.mux.HandleFunc("GET /tls/check", s.handleTLSCheck)
 
 	// --- Terminal / exec ---
 	s.mux.HandleFunc("POST /api/servers/{id}/exec", authCSRF(s.handleExec))

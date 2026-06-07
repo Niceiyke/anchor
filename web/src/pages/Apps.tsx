@@ -4,6 +4,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type App, type Server, type Repo } from "../api";
 import { RunningBadge } from "../components/RunningBadge";
 
+// slugify mirrors the server's protocol.Sanitize so the auto-domain preview
+// matches what the backend will assign.
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[-_]+|[-_]+$/g, "");
+}
+
 export function Apps() {
   const qc = useQueryClient();
   const { data: apps = [] } = useQuery({ queryKey: ["apps"], queryFn: () => api.get<App[]>("/api/apps") });
@@ -13,7 +19,7 @@ export function Apps() {
   // (which 428s when unconfigured) on every load.
   const { data: gh } = useQuery({
     queryKey: ["settings"],
-    queryFn: () => api.get<{ github_app_configured: boolean; github_token_set: boolean }>("/api/settings"),
+    queryFn: () => api.get<{ github_app_configured: boolean; github_token_set: boolean; base_domain: string }>("/api/settings"),
   });
   const githubReady = !!(gh?.github_app_configured || gh?.github_token_set);
   const { data: repos = [] } = useQuery({
@@ -101,7 +107,12 @@ export function Apps() {
           </div>
           <div>
             <label>Domain</label>
-            <input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="app.example.com" />
+            <input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder={gh?.base_domain ? `auto: ${slugify(form.name) || "<slug>"}.${gh.base_domain}` : "app.example.com"} />
+            {gh?.base_domain && !form.domain.trim() && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Leave blank → <code>{(slugify(form.name) || "<slug>")}.{gh.base_domain}</code> (auto HTTPS)
+              </div>
+            )}
           </div>
           <div>
             <label>Container port</label>

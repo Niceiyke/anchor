@@ -234,6 +234,11 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid compose file path", http.StatusBadRequest)
 		return
 	}
+	// Auto-assign a subdomain under the base domain when none was provided.
+	a.Domain = strings.TrimSpace(a.Domain)
+	if a.Domain == "" {
+		a.Domain = s.assignDomain(a.Name)
+	}
 	a.ID = "app_" + randToken()[:12]
 	a.CreatedAt = time.Now()
 	if err := s.store.CreateApp(a); err != nil {
@@ -406,6 +411,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"github_app_installed":     settings.GitHubInstallationID != 0,
 		"github_app_slug":          settings.GitHubAppSlug,
 		"notification_webhook_set": settings.NotificationWebhook != "",
+		"base_domain":              settings.BaseDomain,
 	})
 }
 
@@ -414,6 +420,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		GitHubToken         *string `json:"github_token"`
 		WebhookSecret       *string `json:"webhook_secret"`
 		NotificationWebhook *string `json:"notification_webhook"`
+		BaseDomain          *string `json:"base_domain"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -428,6 +435,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.NotificationWebhook != nil {
 		settings.NotificationWebhook = *body.NotificationWebhook
+	}
+	if body.BaseDomain != nil {
+		settings.BaseDomain = normalizeBaseDomain(*body.BaseDomain)
 	}
 	if err := s.store.SaveSettings(settings); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

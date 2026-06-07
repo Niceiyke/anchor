@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 
@@ -10,6 +10,7 @@ interface SettingsStatus {
   github_app_installed: boolean;
   github_app_slug: string;
   notification_webhook_set: boolean;
+  base_domain: string;
 }
 
 export function Settings() {
@@ -56,6 +57,16 @@ export function Settings() {
   return (
     <>
       <h2>Settings</h2>
+
+      <div className="card">
+        <strong>Base domain</strong>
+        <p className="muted">
+          Apps created without a custom domain get <code>&lt;slug&gt;.&lt;base&gt;</code> automatically,
+          with HTTPS issued on demand. Requires a wildcard DNS record:{" "}
+          <code>*.{data?.base_domain || "apps.example.com"}</code> → this server's IP.
+        </p>
+        <DomainSection current={data?.base_domain ?? ""} onSaved={() => qc.invalidateQueries({ queryKey: ["settings"] })} />
+      </div>
 
       <div className="card">
         <strong>GitHub App</strong>
@@ -134,6 +145,29 @@ export function Settings() {
 
       <UserSection />
     </>
+  );
+}
+
+function DomainSection({ current, onSaved }: { current: string; onSaved: () => void }) {
+  const [val, setVal] = useState(current);
+  const [msg, setMsg] = useState("");
+  // sync the input once the loaded value arrives (only while untouched)
+  useEffect(() => { setVal(current); }, [current]);
+  const save = useMutation({
+    mutationFn: (v: string) => api.put("/api/settings", { base_domain: v.trim() }),
+    onSuccess: () => { setMsg("Saved."); onSaved(); },
+    onError: (e) => setMsg((e as Error).message),
+  });
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="row">
+        <input type="text" placeholder="apps.example.com" value={val} onChange={(e) => setVal(e.target.value)} />
+        <button className="btn" disabled={save.isPending} onClick={() => { setMsg(""); save.mutate(val); }}>Save</button>
+        {current && <button className="btn secondary" onClick={() => { setMsg(""); setVal(""); save.mutate(""); }}>Disable</button>}
+      </div>
+      {current && <div className="muted" style={{ marginTop: 4 }}><span className="dot on" /> Active: <code>{current}</code></div>}
+      {msg && <div className={save.isError ? "error" : "muted"} style={save.isSuccess ? { color: "var(--green)", marginTop: 4 } : { marginTop: 4 }}>{msg}</div>}
+    </div>
   );
 }
 
