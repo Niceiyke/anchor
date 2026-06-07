@@ -70,6 +70,21 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// validReqID reports whether a client-supplied request id is a safe topic key
+// (used verbatim as the SSE topic and the agent request id).
+func validReqID(s string) bool {
+	if len(s) < 4 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // handleStreamLogs starts following a container's logs. Output streams to the
 // browser over SSE on topic exec:<request_id>; call DELETE to stop the follow.
 func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +96,7 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Container string `json:"container"`
 		Tail      int    `json:"tail"`
+		RequestID string `json:"request_id"`
 	}
 	if err := readJSON(r, &body); err != nil || body.Container == "" {
 		http.Error(w, "container required", http.StatusBadRequest)
@@ -90,7 +106,14 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 		body.Tail = 200
 	}
 
-	reqID := "log_" + randToken()[:12]
+	// The client may supply the request_id so it can subscribe to the SSE topic
+	// *before* the agent starts streaming — otherwise the tail backlog races
+	// ahead of the subscriber and is lost (and an idle container then shows
+	// nothing). Validate it's a safe topic key before trusting it.
+	reqID := body.RequestID
+	if !validReqID(reqID) {
+		reqID = "log_" + randToken()[:12]
+	}
 	payload, _ := json.Marshal(protocol.StreamLogsRequest{
 		RequestID: reqID, Container: body.Container, Tail: body.Tail,
 	})

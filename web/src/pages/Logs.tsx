@@ -185,35 +185,36 @@ function LogStream({ serverId, container }: { serverId: string; container: Conta
   useEffect(() => {
     setLines([]);
     let cancelled = false;
+    let started = false;
 
-    (async () => {
-      try {
-        const { request_id } = await api.post<{ request_id: string }>(`/api/servers/${serverId}/logs`, { container: container.name, tail: 300 });
-        if (cancelled) {
-          api.del(`/api/servers/${serverId}/logs/${request_id}`).catch(() => {});
-          return;
-        }
-        ridRef.current = request_id;
-        const es = new EventSource(`/api/events?topic=exec:${request_id}`, { withCredentials: true });
-        esRef.current = es;
-        setLive(true);
-        es.onmessage = (e) => {
-          const evt = JSON.parse(e.data);
-          if (evt.type === "log") {
-            setLines((prev) => {
-              const next = [...prev, { stream: evt.data.stream, line: evt.data.line }];
-              return next.length > 5000 ? next.slice(next.length - 5000) : next;
-            });
-          } else if (evt.type === "command_result") {
-            setLive(false);
-            es.close();
-          }
-        };
-        es.onerror = () => setLive(false);
-      } catch (err) {
-        setLines([{ stream: "stderr", line: (err as Error).message }]);
+    // Subscribe to the SSE topic FIRST, then ask the agent to start streaming
+    // (on `onopen`) — otherwise the tail backlog races ahead of the subscriber
+    // and is lost. We generate the request_id so both ends agree on the topic.
+    const rid = "log_" + (crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)).replace(/-/g, "");
+    ridRef.current = rid;
+    const es = new EventSource(`/api/events?topic=exec:${rid}`, { withCredentials: true });
+    esRef.current = es;
+
+    es.onopen = () => {
+      if (cancelled || started) return;
+      started = true;
+      setLive(true);
+      api.post(`/api/servers/${serverId}/logs`, { container: container.name, tail: 300, request_id: rid })
+        .catch((err) => setLines([{ stream: "stderr", line: (err as Error).message }]));
+    };
+    es.onmessage = (e) => {
+      const evt = JSON.parse(e.data);
+      if (evt.type === "log") {
+        setLines((prev) => {
+          const next = [...prev, { stream: evt.data.stream, line: evt.data.line }];
+          return next.length > 5000 ? next.slice(next.length - 5000) : next;
+        });
+      } else if (evt.type === "command_result") {
+        setLive(false);
+        es.close();
       }
-    })();
+    };
+    es.onerror = () => setLive(false);
 
     return () => {
       cancelled = true;
