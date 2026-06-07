@@ -35,15 +35,17 @@ export function Logs() {
   const [pruneMsg, setPruneMsg] = useState("");
   const exitedCount = containers.filter((c) => c.state !== "running").length;
 
-  async function prune() {
-    if (!confirm("Remove all stopped containers on this server?")) return;
+  async function runPrune(kind: "containers" | "images", confirmText: string) {
+    if (!confirm(confirmText)) return;
     setPruneMsg("");
     setPruning(true);
     try {
-      const res = await api.post<{ output: string }>(`/api/servers/${serverId}/containers/prune`);
-      setPruneMsg(res.output?.split("\n").pop() || "Pruned.");
-      if (active && active.state !== "running") setActive(null);
-      refetch();
+      const res = await api.post<{ output: string }>(`/api/servers/${serverId}/${kind}/prune`);
+      setPruneMsg(res.output?.split("\n").filter(Boolean).pop() || "Pruned.");
+      if (kind === "containers") {
+        if (active && active.state !== "running") setActive(null);
+        refetch();
+      }
     } catch (e) {
       setPruneMsg((e as Error).message || "Prune failed");
     } finally {
@@ -59,8 +61,21 @@ export function Logs() {
           <select style={{ width: 200 }} value={serverId} onChange={(e) => { setServerId(e.target.value); setActive(null); setPruneMsg(""); }}>
             {servers.map((s) => <option key={s.id} value={s.id} disabled={!s.online}>{s.name}{s.online ? "" : " (offline)"}</option>)}
           </select>
-          <button className="btn secondary" onClick={prune} disabled={pruning || !serverId || exitedCount === 0} title="Remove all stopped containers">
+          <button
+            className="btn secondary"
+            onClick={() => runPrune("containers", "Remove all stopped containers on this server?")}
+            disabled={pruning || !serverId || exitedCount === 0}
+            title="Remove all stopped containers"
+          >
             {pruning ? "Pruning…" : `Prune exited${exitedCount ? ` (${exitedCount})` : ""}`}
+          </button>
+          <button
+            className="btn secondary"
+            onClick={() => runPrune("images", "Remove dangling (unused) images on this server?")}
+            disabled={pruning || !serverId}
+            title="Remove dangling images to reclaim disk space"
+          >
+            {pruning ? "Pruning…" : "Prune images"}
           </button>
           <button className="btn secondary" onClick={() => refetch()} disabled={isFetching}>↻</button>
         </div>

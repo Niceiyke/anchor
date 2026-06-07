@@ -59,3 +59,23 @@ func TestHandlePruneContainers(t *testing.T) {
 		t.Errorf("offline agent: got %d, want 409", code)
 	}
 }
+
+func TestHandlePruneImages(t *testing.T) {
+	srv, st := newTestServer(t)
+	_ = st.CreateServer(store.Server{ID: "srv_1", Name: "vps", AgentToken: "t"})
+
+	prune := func(serverID string) int {
+		r := httptest.NewRequest("POST", "/api/servers/"+serverID+"/images/prune", nil)
+		r.SetPathValue("id", serverID)
+		w := httptest.NewRecorder()
+		srv.handlePruneImages(w, r)
+		return w.Code
+	}
+
+	if code := prune("nope"); code != 404 {
+		t.Errorf("unknown server: got %d, want 404", code)
+	}
+	if code := prune("srv_1"); code != 409 { // agent offline
+		t.Errorf("offline agent: got %d, want 409", code)
+	}
+}

@@ -171,6 +171,27 @@ func (a *Agent) pruneContainers(ctx context.Context, req protocol.PruneContainer
 	})
 }
 
+// pruneImages removes dangling images (or all unused images when All is set)
+// and replies with docker's summary.
+func (a *Agent) pruneImages(ctx context.Context, req protocol.PruneImagesRequest) {
+	args := []string{"image", "prune", "-f"}
+	if req.All {
+		args = append(args, "-a")
+	}
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	exit := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exit = ee.ExitCode()
+		} else {
+			exit = -1
+		}
+	}
+	a.emit(protocol.EvtCommandResult, protocol.CommandResult{
+		RequestID: req.RequestID, ExitCode: exit, Output: strings.TrimSpace(string(out)),
+	})
+}
+
 // stopApp stops and removes an app's container(s).
 func (a *Agent) stopApp(ctx context.Context, req protocol.StopAppRequest) {
 	name := sanitize(req.AppName)
