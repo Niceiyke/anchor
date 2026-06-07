@@ -163,9 +163,13 @@ Open an app (**Applications → name**) for its full control surface:
 - **Configuration** (collapsible) — edit branch, domain, container port,
   compose file, and auto-deploy. Server and repo are immutable; changes apply
   on the next deploy. (`PATCH /api/apps/{id}`)
-- **Environment & secrets** — add, edit, or remove env vars (values masked by
-  default; toggle to reveal). Attach a managed database to inject its
-  connection string. Variables are injected into the container on deploy.
+- **Environment & secrets** — add, edit, or remove env vars. Each var is 🔒
+  **secret** (masked, the safe default) or 🔓 **plain** (shown) — toggle per
+  variable, or "Reveal secrets" to peek. Attached database connection strings
+  are always secret. Variables are injected into the container on deploy.
+- **Status badge** — a live running/stopped indicator (on the app header and
+  the Apps list) derived from the agent's container list. Works for both
+  Dockerfile (`<name>`) and Compose (`<name>-<service>-N`) apps.
 - **Danger zone → Delete app** — removes the app *and* stops/removes its
   container(s) on the server. Also available as a row action on the Apps list.
 

@@ -8,11 +8,28 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
 // ProtocolVersion is incremented on breaking changes to the agent protocol.
 const ProtocolVersion = 1
+
+// Sanitize converts an app name into a docker-safe container / compose-project
+// name. Shared by the agent (which names containers) and the control plane
+// (which derives the expected container name to report running status).
+func Sanitize(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-_")
+}
 
 // ---- Control plane -> Agent ------------------------------------------------
 

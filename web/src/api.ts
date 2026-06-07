@@ -75,6 +75,8 @@ export interface App {
   container_port: number;
   auto_deploy: boolean;
   env_vars: Record<string, string>;
+  env_secret?: Record<string, boolean>;
+  container_name?: string;
   compose_file?: string;
   last_good_sha?: string;
   created_at: string;

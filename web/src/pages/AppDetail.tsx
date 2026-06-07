@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type App, type Deployment, type LogLine, type Database } from "../api";
+import { RunningBadge } from "../components/RunningBadge";
 
 export function AppDetail() {
   const { appId } = useParams({ from: "/app-layout/apps/$appId" });
@@ -46,7 +47,10 @@ export function AppDetail() {
   return (
     <>
       <div className="row">
-        <h2 style={{ marginBottom: 0 }}>{app?.name ?? "App"}</h2>
+        <div className="row" style={{ gap: 10 }}>
+          <h2 style={{ marginBottom: 0 }}>{app?.name ?? "App"}</h2>
+          {app && <RunningBadge serverId={app.server_id} containerName={app.container_name} online={serverOnline} />}
+        </div>
         <div className="row" style={{ gap: 6 }}>
           {!serverOnline && (
             <span className="badge failed" style={{ fontSize: 12 }}>agent offline — actions unavailable</span>
@@ -227,7 +231,11 @@ function EnvSection({ app }: { app: App }) {
   // add/edit a single variable
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const [secret, setSecret] = useState(true);
   const [editing, setEditing] = useState(false);
+
+  // a var is secret unless explicitly marked plain (false) — safe default
+  const isSecret = (k: string) => app.env_secret?.[k] !== false;
 
   const selectedDb = sameServerDBs.find((d) => d.id === dbId);
   const suggestedVar = selectedDb ? (selectedDb.engine === "redis" ? "REDIS_URL" : "DATABASE_URL") : "";
@@ -244,10 +252,11 @@ function EnvSection({ app }: { app: App }) {
   });
 
   const setVar = useMutation({
-    mutationFn: () => api.post(`/api/apps/${app.id}/env`, { key: key.trim(), value }),
-    onSuccess: () => {
-      setNotice(`Saved ${key.trim()}. Redeploy to apply.`);
-      setKey(""); setValue(""); setEditing(false);
+    mutationFn: (v: { key: string; value: string; secret: boolean }) =>
+      api.post(`/api/apps/${app.id}/env`, { key: v.key.trim(), value: v.value, secret: v.secret }),
+    onSuccess: (_d, v) => {
+      setNotice(`Saved ${v.key.trim()}. Redeploy to apply.`);
+      setKey(""); setValue(""); setSecret(true); setEditing(false);
       refresh();
     },
   });
@@ -258,7 +267,12 @@ function EnvSection({ app }: { app: App }) {
   });
 
   function startEdit(k: string, v: string) {
-    setKey(k); setValue(v); setEditing(true); setNotice("");
+    setKey(k); setValue(v); setSecret(isSecret(k)); setEditing(true); setNotice("");
+  }
+
+  // flip a var between secret (masked) and plain without changing its value
+  function toggleSecret(k: string) {
+    setVar.mutate({ key: k, value: app.env_vars[k], secret: !isSecret(k) });
   }
 
   const entries = Object.entries(app.env_vars || {});
@@ -266,21 +280,31 @@ function EnvSection({ app }: { app: App }) {
   return (
     <div className="card">
       <strong>Environment &amp; secrets</strong>
-      <p className="muted" style={{ marginTop: 4 }}>Injected into the container on deploy. Values are hidden by default.</p>
+      <p className="muted" style={{ marginTop: 4 }}>Injected into the container on deploy. 🔒 secrets are masked; 🔓 plain values are shown. Toggle per variable.</p>
 
       <div style={{ marginTop: 10 }}>
         {entries.length === 0 && <div className="muted">No environment variables yet.</div>}
-        {entries.map(([k, v]) => (
-          <div className="row" key={k} style={{ padding: "4px 0", fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}><b>{k}</b>=<span className="muted">{reveal ? v : maskValue(v)}</span></span>
-            <span className="row" style={{ gap: 6 }}>
-              <button className="btn secondary" style={{ padding: "2px 8px" }} onClick={() => startEdit(k, v)}>Edit</button>
-              <button className="btn secondary" style={{ padding: "2px 8px" }} onClick={() => { if (confirm(`Remove ${k}?`)) removeVar.mutate(k); }}>Remove</button>
-            </span>
-          </div>
-        ))}
-        {entries.length > 0 && (
-          <button className="btn secondary" style={{ marginTop: 6 }} onClick={() => setReveal((r) => !r)}>{reveal ? "Hide values" : "Show values"}</button>
+        {entries.map(([k, v]) => {
+          const sec = isSecret(k);
+          const shown = !sec || reveal;
+          return (
+            <div className="row" key={k} style={{ padding: "4px 0", fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                <span title={sec ? "secret" : "plain"} style={{ marginRight: 4 }}>{sec ? "🔒" : "🔓"}</span>
+                <b>{k}</b>=<span className="muted">{shown ? v : maskValue(v)}</span>
+              </span>
+              <span className="row" style={{ gap: 6 }}>
+                <button className="btn secondary" style={{ padding: "2px 8px" }} title={sec ? "Mark as plain (show value)" : "Mark as secret (mask value)"} onClick={() => toggleSecret(k)}>
+                  {sec ? "Unmask" : "Mask"}
+                </button>
+                <button className="btn secondary" style={{ padding: "2px 8px" }} onClick={() => startEdit(k, v)}>Edit</button>
+                <button className="btn secondary" style={{ padding: "2px 8px" }} onClick={() => { if (confirm(`Remove ${k}?`)) removeVar.mutate(k); }}>Remove</button>
+              </span>
+            </div>
+          );
+        })}
+        {entries.some(([k]) => isSecret(k)) && (
+          <button className="btn secondary" style={{ marginTop: 6 }} onClick={() => setReveal((r) => !r)}>{reveal ? "Hide secrets" : "Reveal secrets"}</button>
         )}
       </div>
 
@@ -300,11 +324,15 @@ function EnvSection({ app }: { app: App }) {
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
-          <button className="btn" disabled={!key.trim() || setVar.isPending} onClick={() => { setNotice(""); setVar.mutate(); }}>
+          <button className="btn" disabled={!key.trim() || setVar.isPending} onClick={() => { setNotice(""); setVar.mutate({ key, value, secret }); }}>
             {setVar.isPending ? "Saving…" : editing ? "Save" : "Add"}
           </button>
-          {editing && <button className="btn secondary" onClick={() => { setEditing(false); setKey(""); setValue(""); }}>Cancel</button>}
+          {editing && <button className="btn secondary" onClick={() => { setEditing(false); setKey(""); setValue(""); setSecret(true); }}>Cancel</button>}
         </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={secret} onChange={(e) => setSecret(e.target.checked)} />
+          Secret (mask value in the UI)
+        </label>
         {setVar.isError && <div className="error" style={{ marginTop: 6 }}>{(setVar.error as Error).message}</div>}
       </div>
 

@@ -72,3 +72,34 @@ func TestHandleUpdateApp(t *testing.T) {
 		t.Fatalf("missing app should 404, got %d", code)
 	}
 }
+
+func TestHandleSetEnvSecretFlag(t *testing.T) {
+	srv, st := newTestServer(t)
+	_ = st.CreateApp(store.App{ID: "app_1", Name: "x", ServerID: "s1", RepoURL: "u", Branch: "main", ContainerPort: 3000, EnvVars: map[string]string{}})
+
+	setEnv := func(body string) {
+		r := httptest.NewRequest("POST", "/api/apps/app_1/env", strings.NewReader(body))
+		r.SetPathValue("id", "app_1")
+		w := httptest.NewRecorder()
+		srv.handleSetEnv(w, r)
+		if w.Code != 200 {
+			t.Fatalf("setEnv %s: got %d", body, w.Code)
+		}
+	}
+
+	// No secret field -> defaults to secret (safe).
+	setEnv(`{"key":"API_KEY","value":"abc"}`)
+	// Explicit plain.
+	setEnv(`{"key":"PUBLIC_URL","value":"https://x","secret":false}`)
+
+	a, _ := st.GetApp("app_1")
+	if a.EnvVars["API_KEY"] != "abc" || a.EnvVars["PUBLIC_URL"] != "https://x" {
+		t.Fatalf("values not stored: %+v", a.EnvVars)
+	}
+	if a.EnvSecret["API_KEY"] != true {
+		t.Error("API_KEY should default to secret")
+	}
+	if a.EnvSecret["PUBLIC_URL"] != false {
+		t.Error("PUBLIC_URL should be plain when secret=false")
+	}
+}

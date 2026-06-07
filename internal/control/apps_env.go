@@ -3,6 +3,8 @@ package control
 import (
 	"net/http"
 	"strings"
+
+	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
 // defaultDBEnvVar is the conventional env var name for each engine's URL.
@@ -46,6 +48,10 @@ func (s *Server) handleAttachDB(w http.ResponseWriter, r *http.Request) {
 		app.EnvVars = map[string]string{}
 	}
 	app.EnvVars[varName] = db.ConnURI
+	if app.EnvSecret == nil {
+		app.EnvSecret = map[string]bool{}
+	}
+	app.EnvSecret[varName] = true // a DB connection string is always a secret
 	if err := s.store.UpdateApp(app); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -67,21 +73,28 @@ func (s *Server) handleSetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
+		Key    string `json:"key"`
+		Value  string `json:"value"`
+		Secret *bool  `json:"secret"` // nil = secret (safe default)
 	}
 	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Key) == "" {
 		http.Error(w, "key required", http.StatusBadRequest)
 		return
 	}
+	key := strings.TrimSpace(body.Key)
 	if app.EnvVars == nil {
 		app.EnvVars = map[string]string{}
 	}
-	app.EnvVars[body.Key] = body.Value
+	if app.EnvSecret == nil {
+		app.EnvSecret = map[string]bool{}
+	}
+	app.EnvVars[key] = body.Value
+	app.EnvSecret[key] = body.Secret == nil || *body.Secret
 	if err := s.store.UpdateApp(app); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	app.ContainerName = protocol.Sanitize(app.Name)
 	writeJSON(w, http.StatusOK, app)
 }
 
@@ -92,10 +105,13 @@ func (s *Server) handleDeleteEnv(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
-	delete(app.EnvVars, r.PathValue("key"))
+	key := r.PathValue("key")
+	delete(app.EnvVars, key)
+	delete(app.EnvSecret, key)
 	if err := s.store.UpdateApp(app); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	app.ContainerName = protocol.Sanitize(app.Name)
 	writeJSON(w, http.StatusOK, app)
 }
