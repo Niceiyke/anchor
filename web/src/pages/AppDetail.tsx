@@ -73,6 +73,8 @@ export function AppDetail() {
       {rollback.isError && <div className="error">{(rollback.error as Error).message}</div>}
       {stop.isError && <div className="error">{(stop.error as Error).message}</div>}
 
+      {app && <AppSettings app={app} />}
+
       {app && <EnvSection app={app} />}
 
       <h3 style={{ marginBottom: 0 }}>Deployments</h3>
@@ -98,6 +100,70 @@ export function AppDetail() {
         <div>{activeId ? <DeploymentLogs deploymentId={activeId} /> : <div className="muted">Select a deployment.</div>}</div>
       </div>
     </>
+  );
+}
+
+function AppSettings({ app }: { app: App }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    branch: app.branch,
+    domain: app.domain,
+    container_port: app.container_port,
+    auto_deploy: app.auto_deploy,
+    compose_file: app.compose_file ?? "",
+  });
+  const [msg, setMsg] = useState("");
+
+  const dirty =
+    form.branch !== app.branch ||
+    form.domain !== app.domain ||
+    form.container_port !== app.container_port ||
+    form.auto_deploy !== app.auto_deploy ||
+    (form.compose_file ?? "") !== (app.compose_file ?? "");
+
+  const save = useMutation({
+    mutationFn: () => api.patch<App>(`/api/apps/${app.id}`, form),
+    onSuccess: () => {
+      setMsg("Saved. Redeploy to apply.");
+      qc.invalidateQueries({ queryKey: ["app", app.id] });
+      qc.invalidateQueries({ queryKey: ["apps"] });
+    },
+    onError: (e) => setMsg((e as Error).message),
+  });
+
+  return (
+    <details className="card">
+      <summary style={{ cursor: "pointer", fontWeight: 600 }}>Configuration</summary>
+      <p className="muted" style={{ marginTop: 8 }}>
+        Server and repository are fixed. Changes here apply on the next deploy.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div>
+          <label>Branch</label>
+          <input value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+        </div>
+        <div>
+          <label>Domain</label>
+          <input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="app.example.com" />
+        </div>
+        <div>
+          <label>Container port</label>
+          <input type="number" value={form.container_port} onChange={(e) => setForm({ ...form, container_port: +e.target.value })} />
+        </div>
+        <div>
+          <label>Compose file</label>
+          <input value={form.compose_file} onChange={(e) => setForm({ ...form, compose_file: e.target.value })} placeholder="auto-detect — or e.g. docker-compose.prod.yml" />
+        </div>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={form.auto_deploy} onChange={(e) => setForm({ ...form, auto_deploy: e.target.checked })} />
+        Auto-deploy on push
+      </label>
+      <button className="btn" style={{ marginTop: 12 }} disabled={!dirty || save.isPending} onClick={() => { setMsg(""); save.mutate(); }}>
+        {save.isPending ? "Saving…" : "Save changes"}
+      </button>
+      {msg && <div className={save.isError ? "error" : "muted"} style={save.isSuccess ? { color: "var(--green)", marginTop: 8 } : { marginTop: 8 }}>{msg}</div>}
+    </details>
   );
 }
 
