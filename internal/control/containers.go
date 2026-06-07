@@ -70,3 +70,42 @@ func (s *Server) handleContainerAction(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 	}
 }
+
+// handlePruneContainers removes all stopped containers on the server's agent
+// and returns docker's prune summary.
+func (s *Server) handlePruneContainers(w http.ResponseWriter, r *http.Request) {
+	serverID := r.PathValue("id")
+	if _, err := s.store.GetServer(serverID); err != nil {
+		http.Error(w, "server not found", http.StatusNotFound)
+		return
+	}
+
+	reqID := "cp_" + randToken()[:12]
+	ch, cancel := s.awaitReply(reqID)
+	defer cancel()
+
+	payload, _ := json.Marshal(protocol.PruneContainersRequest{RequestID: reqID})
+	cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdPruneContainers, Data: payload}
+	if !s.hub.Send(serverID, cmd) {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+
+	select {
+	case evt := <-ch:
+		var res protocol.CommandResult
+		_ = json.Unmarshal(evt.Data, &res)
+		if res.ExitCode != 0 {
+			msg := res.Output
+			if msg == "" {
+				msg = "prune failed"
+			}
+			http.Error(w, msg, http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"output": res.Output})
+	case <-time.After(30 * time.Second):
+		http.Error(w, "agent did not respond", http.StatusGatewayTimeout)
+	case <-r.Context().Done():
+	}
+}
