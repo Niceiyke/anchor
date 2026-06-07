@@ -7,9 +7,18 @@ export function Apps() {
   const qc = useQueryClient();
   const { data: apps = [] } = useQuery({ queryKey: ["apps"], queryFn: () => api.get<App[]>("/api/apps") });
   const { data: servers = [] } = useQuery({ queryKey: ["servers"], queryFn: () => api.get<Server[]>("/api/servers") });
+
+  // Only fetch repos once GitHub is connected, so we don't hit /api/github/repos
+  // (which 428s when unconfigured) on every load.
+  const { data: gh } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.get<{ github_app_configured: boolean; github_token_set: boolean }>("/api/settings"),
+  });
+  const githubReady = !!(gh?.github_app_configured || gh?.github_token_set);
   const { data: repos = [] } = useQuery({
     queryKey: ["repos"],
     queryFn: () => api.get<Repo[]>("/api/github/repos"),
+    enabled: githubReady,
     retry: false,
   });
 
@@ -50,7 +59,7 @@ export function Apps() {
             {repos.map((r) => <option key={r.full_name} value={r.full_name}>{r.full_name}{r.private ? " 🔒" : ""}</option>)}
           </select>
         ) : (
-          <div className="muted">No repos — set a GitHub token in Settings, or paste a clone URL below.</div>
+          <div className="muted">{githubReady ? "No repos found for this GitHub account." : "Connect GitHub in Settings to pick a repo — or paste a clone URL below."}</div>
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
