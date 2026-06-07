@@ -304,7 +304,7 @@ func (s *jsonStore) GetApp(id string) (App, error) {
 func (s *jsonStore) AppsByRepo(fullName string) ([]App, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var out []App
+	out := []App{}
 	for _, v := range s.d.Apps {
 		if v.RepoFullName == fullName {
 			out = append(out, v)
@@ -340,7 +340,7 @@ func (s *jsonStore) DeleteApp(id string) error {
 func (s *jsonStore) ListDeployments(appID string) ([]Deployment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var out []Deployment
+	out := []Deployment{}
 	for _, v := range s.d.Deployments {
 		if appID == "" || v.AppID == appID {
 			out = append(out, v)

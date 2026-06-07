@@ -272,7 +272,7 @@ func (s *Server) listInstallationRepos() ([]repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var all []repo
+	all := []repo{}
 	for page := 1; page <= 10; page++ {
 		url := fmt.Sprintf("https://api.github.com/installation/repositories?per_page=100&page=%d", page)
 		req, _ := http.NewRequest("GET", url, nil)

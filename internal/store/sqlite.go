@@ -153,7 +153,7 @@ func (s *sqliteStore) ListServers() ([]Server, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Server
+	out := []Server{}
 	for rows.Next() {
 		v, err := scanServer(rows)
 		if err != nil {
@@ -244,7 +244,7 @@ func (s *sqliteStore) ListApps() ([]App, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []App
+	out := []App{}
 	for rows.Next() {
 		v, err := scanApp(rows)
 		if err != nil {
@@ -270,7 +270,7 @@ func (s *sqliteStore) AppsByRepo(fullName string) ([]App, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []App
+	out := []App{}
 	for rows.Next() {
 		v, err := scanApp(rows)
 		if err != nil {
@@ -326,7 +326,7 @@ func (s *sqliteStore) ListDeployments(appID string) ([]Deployment, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Deployment
+	out := []Deployment{}
 	for rows.Next() {
 		v, err := scanDeployment(rows)
 		if err != nil {
@@ -429,7 +429,7 @@ func (s *sqliteStore) ListDatabases() ([]Database, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Database
+	out := []Database{}
 	for rows.Next() {
 		v, err := scanDatabase(rows)
 		if err != nil {
