@@ -18,6 +18,9 @@ services:
       # auto-register the co-located agent (see the `agent` service)
       ANCHOR_BOOTSTRAP_AGENT_TOKEN: ${ANCHOR_LOCAL_AGENT_TOKEN:-}
       ANCHOR_BOOTSTRAP_SERVER_NAME: ${ANCHOR_LOCAL_SERVER_NAME:-this-vps}
+      # apps without a custom domain get <slug>.<base>; needs a wildcard
+      # DNS record (*.<base> A -> this VPS). Seeded once; editable in Settings.
+      ANCHOR_BASE_DOMAIN: ${ANCHOR_BASE_DOMAIN:-}
     volumes:
       - anchor-data:/data
     networks: [anchor_net]

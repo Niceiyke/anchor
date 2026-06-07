@@ -96,6 +96,9 @@ func main() {
 		}
 	}
 
+	// Optional: seed the base domain for auto-assigned app subdomains.
+	srv.EnsureBaseDomain(os.Getenv("ANCHOR_BASE_DOMAIN"))
+
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           withCORS(srv.Handler()),

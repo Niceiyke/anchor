@@ -28,7 +28,10 @@ func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest) 
 	}
 
 	upstream := fmt.Sprintf("%s:%d", sanitize(req.AppName), req.ContainerPort)
-	snippet := fmt.Sprintf("%s {\n\treverse_proxy %s\n}\n", req.Domain, upstream)
+	// on_demand TLS lets Caddy obtain a cert for this domain on first request,
+	// gated by the control plane's /tls/check ask endpoint — so auto-assigned
+	// subdomains (and custom domains) get HTTPS without pre-provisioning.
+	snippet := fmt.Sprintf("%s {\n\treverse_proxy %s\n\ttls {\n\t\ton_demand\n\t}\n}\n", req.Domain, upstream)
 	path := filepath.Join(dir, sanitize(req.AppName)+".caddy")
 	if err := os.WriteFile(path, []byte(snippet), 0o644); err != nil {
 		return err
