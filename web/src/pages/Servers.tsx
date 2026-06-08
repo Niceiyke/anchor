@@ -45,14 +45,7 @@ export function Servers() {
           <button className="btn" onClick={() => add.mutate()} disabled={!name || add.isPending}>Add server</button>
         </div>
         {add.isError && <div className="error">{(add.error as Error).message}</div>}
-        {created && (
-          <div style={{ marginTop: 16 }}>
-            <div className="muted">Run this on <b>{created.name}</b> to connect its agent (token shown once):</div>
-            <pre className="logs" style={{ height: "auto" }}>{`ANCHOR_URL=${cpURL} \\
-ANCHOR_TOKEN=${created.agent_token} \\
-./anchor-agent`}</pre>
-          </div>
-        )}
+        {created && <InstallCommand server={created} cpURL={cpURL} />}
       </div>
 
       <div className="grid">
@@ -86,6 +79,28 @@ ANCHOR_TOKEN=${created.agent_token} \\
         {!error && servers.length === 0 && <div className="muted">No servers yet. Add one above.</div>}
       </div>
     </>
+  );
+}
+
+function InstallCommand({ server, cpURL }: { server: Server; cpURL: string }) {
+  const [copied, setCopied] = useState(false);
+  const cmd = `curl -fsSL ${cpURL}/install.sh | sudo bash -s -- --token=${server.agent_token}`;
+  const copy = () => {
+    navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="row">
+        <div className="muted">Run this on <b>{server.name}</b> to install and connect its agent (token shown once):</div>
+        <button className="btn secondary" style={{ padding: "2px 10px", fontSize: 12 }} onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+      </div>
+      <pre className="logs" style={{ height: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{cmd}</pre>
+      <div className="muted" style={{ fontSize: 12 }}>
+        Installs Docker (if missing), the version-matched agent binary, a per-VPS Caddy router, and a systemd service. No inbound ports needed.
+      </div>
+    </div>
   );
 }
 

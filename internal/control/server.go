@@ -150,6 +150,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /agent/v1/stream", s.handleAgentStream)
 	s.mux.HandleFunc("POST /agent/v1/events", s.handleAgentEvents)
 
+	// --- Agent install (public: binary + scripts, not secret) ---
+	s.mux.HandleFunc("GET /install.sh", s.handleInstallScript)
+	s.mux.HandleFunc("GET /agent/download", s.handleAgentDownload)
+	s.mux.HandleFunc("GET /agent/caddyfile", s.handleAgentCaddyfile)
+
 	// --- Auth ---
 	s.mux.HandleFunc("POST /api/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/logout", auth(s.handleLogout))
