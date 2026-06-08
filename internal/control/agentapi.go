@@ -102,6 +102,13 @@ func (s *Server) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
 // ingestEvent applies a single agent event to the store.
 func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 	switch evt.Type {
+	case protocol.EvtHello:
+		var h protocol.Hello
+		if json.Unmarshal(evt.Data, &h) != nil {
+			return
+		}
+		s.maybeUpdateAgent(serverID, h)
+
 	case protocol.EvtSystemStats:
 		var st protocol.SystemStats
 		if json.Unmarshal(evt.Data, &st) != nil {

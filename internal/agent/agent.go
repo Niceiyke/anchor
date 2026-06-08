@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -34,6 +35,9 @@ type Agent struct {
 
 	streamsMu sync.Mutex
 	streams   map[string]context.CancelFunc // requestID -> cancel for active log follows
+
+	shaOnce sync.Once
+	sha     string // sha256 of the running binary (for auto-update), see update.go
 }
 
 func New(cfg Config) *Agent {
@@ -187,6 +191,12 @@ func (a *Agent) dispatch(ctx context.Context, cmd protocol.Command) {
 			return
 		}
 		a.backupDB(ctx, req)
+	case protocol.CmdUpdateAgent:
+		var req protocol.UpdateAgentRequest
+		if err := json.Unmarshal(cmd.Data, &req); err != nil {
+			return
+		}
+		a.selfUpdate(ctx, req)
 	default:
 		log.Printf("unknown command type %q", cmd.Type)
 	}
@@ -202,7 +212,11 @@ func (a *Agent) handleHello(cmd protocol.Command) {
 		log.Printf("WARNING: control plane protocol is newer (%d > %d) — some commands may be unsupported",
 			hello.Version, protocol.ProtocolVersion)
 	}
-	a.emit(protocol.EvtHello, protocol.Hello{Version: protocol.ProtocolVersion})
+	a.emit(protocol.EvtHello, protocol.Hello{
+		Version: protocol.ProtocolVersion,
+		Arch:    runtime.GOARCH,
+		BinSHA:  a.selfSHA(),
+	})
 }
 
 // ---- Outbound events -------------------------------------------------------
