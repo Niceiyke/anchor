@@ -1,0 +1,4 @@
+# Cross-compiled agent binaries (anchor-agent-linux-amd64, -arm64) are built
+# into this directory by `make agent-embed` and embedded into the control plane
+# so it can serve them at /agent/download. The binaries themselves are
+# gitignored; this file keeps the directory present for //go:embed.

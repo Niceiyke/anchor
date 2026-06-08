@@ -114,19 +114,23 @@ an app with a domain whose DNS points here and Caddy provisions its cert too.
 
 Day-to-day ops (update, logs, backups) live in [`deploy/UPDATE.md`](deploy/UPDATE.md).
 
-**Each *additional* VPS you want to deploy to:**
+**Each *additional* VPS you want to deploy to** — one command, copied straight
+from **Servers → Add server** (the agent token is shown once):
 
 ```bash
-make agent-linux            # cross-compile -> bin/anchor-agent-linux
-scp bin/anchor-agent-linux  user@vps:/tmp/anchor-agent
-scp scripts/install-agent.sh deploy/agent-caddy/Caddyfile user@vps:/tmp/
-# on the VPS:
-sudo ANCHOR_URL=https://anchor.example.com ANCHOR_TOKEN=<token from dashboard> \
-  ANCHOR_AGENT_BIN=/tmp/anchor-agent /tmp/install-agent.sh
+curl -fsSL https://anchor.example.com/install.sh | sudo bash -s -- --token=<token>
 ```
 
-The installer sets up the `anchor_net` Docker network, a Caddy container that
-routes app domains, and a `systemd` service for the agent.
+The control plane serves the installer and the version-matched agent binary
+itself, so there's nothing to build or `scp`. The script installs Docker (if
+missing), drops the agent binary in `/usr/local/bin`, sets up the `anchor_net`
+Docker network and a Caddy container that routes app domains, and registers a
+`systemd` service. The agent dials out — no inbound ports required.
+
+> The bundled binaries cover `linux/amd64` and `linux/arm64`. They're embedded
+> into the control plane at build time (`make agent-embed`, run automatically by
+> `make run` and the production `Dockerfile`). A bare `go build` skips them, in
+> which case `/agent/download` reports that no binary is bundled.
 
 ## Connecting GitHub
 

@@ -13,6 +13,10 @@ RUN go mod download
 COPY pkg ./pkg
 COPY internal ./internal
 COPY cmd ./cmd
+# Cross-compile the agent for linux amd64+arm64 into the embed dir so the
+# control plane can serve version-matched binaries at /agent/download.
+RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o internal/control/agentbin/anchor-agent-linux-amd64 ./cmd/agent && \
+    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o internal/control/agentbin/anchor-agent-linux-arm64 ./cmd/agent
 RUN CGO_ENABLED=0 go build -o /anchor-cp ./cmd/control-plane
 
 FROM alpine:3.20

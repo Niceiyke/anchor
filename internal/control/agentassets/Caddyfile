@@ -1,0 +1,10 @@
+# Per-VPS Caddy that routes traffic to deployed apps.
+# The agent drops one <app>.caddy snippet per app into ./apps and reloads Caddy.
+# Each snippet is a full site block: "domain { reverse_proxy app-name:port }".
+
+{
+	# email for ACME/Let's Encrypt; override by editing this file
+	email admin@example.com
+}
+
+import /etc/caddy/apps/*.caddy
