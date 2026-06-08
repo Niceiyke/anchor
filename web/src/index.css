@@ -42,7 +42,7 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); }
 .badge.success { color: var(--green); border-color: var(--green); }
 .badge.failed { color: var(--red); border-color: var(--red); }
-.badge.building, .badge.cloning, .badge.starting, .badge.queued, .badge.detecting, .badge.configuring { color: var(--yellow); border-color: var(--yellow); }
+.badge.building, .badge.cloning, .badge.starting, .badge.queued, .badge.detecting, .badge.configuring, .badge.health_check { color: var(--yellow); border-color: var(--yellow); }
 
 .bar { height: 6px; background: #21262d; border-radius: 4px; overflow: hidden; margin-top: 4px; }
 .bar > div { height: 100%; background: var(--accent); }

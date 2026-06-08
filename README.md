@@ -170,6 +170,22 @@ Two options, in **Settings**:
 
 On push, every app bound to that repo+branch with auto-deploy redeploys.
 
+## Health-gated deploys & auto-rollback
+
+After a build starts, the agent waits for the app to become healthy before
+reporting success: the container must be running (not crash-looping), a Docker
+`HEALTHCHECK` (if the image defines one) must report `healthy`, and — when you
+set a **Health check path** (e.g. `/healthz`) — an HTTP probe inside the
+container must succeed. A deploy that never becomes healthy within the timeout
+(default 45s, configurable) is marked **failed** instead of silently "succeeded".
+
+Enable **Auto-rollback** on an app and a failed health check automatically
+redeploys the last commit that *did* pass — so a bad push self-heals back to the
+previous good version. (Anchor only records a commit as "last good" once it has
+passed health gating, so rollbacks always target a known-healthy build.)
+
+Both are configured per app under **Configuration** on the app page.
+
 ## Auto-assigned domains
 
 Set a **Base domain** (Settings, or `ANCHOR_BASE_DOMAIN`), e.g. `apps.example.com`.
@@ -313,7 +329,10 @@ to add `expose: ["<port>"]` to the web service. Make sure the app binds
 - [x] Live container log viewer (list + cancellable follow)
 - [x] Managed databases (Postgres/Redis, persistent volumes, conn strings)
 - [x] One-click attach DB connection string into an app's env vars
-- [ ] Rollbacks + deployment history diffing
+- [x] Manual rollback to last good deploy
+- [x] One-script agent install + agent auto-update
+- [x] Health-gated deploys + auto-rollback
+- [ ] Deployment history diffing
 - [ ] Multi-user + RBAC
-- [ ] Health checks + zero-downtime swaps
+- [ ] Zero-downtime (blue-green) swaps
 ```
