@@ -162,6 +162,9 @@ function AppSettings({ app }: { app: App }) {
     container_port: app.container_port,
     auto_deploy: app.auto_deploy,
     compose_file: app.compose_file ?? "",
+    health_path: app.health_path ?? "",
+    health_timeout_secs: app.health_timeout_secs ?? 0,
+    auto_rollback: app.auto_rollback ?? false,
   });
   const [msg, setMsg] = useState("");
 
@@ -170,7 +173,10 @@ function AppSettings({ app }: { app: App }) {
     form.domain !== app.domain ||
     form.container_port !== app.container_port ||
     form.auto_deploy !== app.auto_deploy ||
-    (form.compose_file ?? "") !== (app.compose_file ?? "");
+    (form.compose_file ?? "") !== (app.compose_file ?? "") ||
+    (form.health_path ?? "") !== (app.health_path ?? "") ||
+    form.health_timeout_secs !== (app.health_timeout_secs ?? 0) ||
+    form.auto_rollback !== (app.auto_rollback ?? false);
 
   const save = useMutation({
     mutationFn: () => api.patch<App>(`/api/apps/${app.id}`, form),
@@ -205,10 +211,22 @@ function AppSettings({ app }: { app: App }) {
           <label>Compose file</label>
           <input value={form.compose_file} onChange={(e) => setForm({ ...form, compose_file: e.target.value })} placeholder="auto-detect — or e.g. docker-compose.prod.yml" />
         </div>
+        <div>
+          <label>Health check path</label>
+          <input value={form.health_path} onChange={(e) => setForm({ ...form, health_path: e.target.value })} placeholder="optional — e.g. /healthz" />
+        </div>
+        <div>
+          <label>Health timeout (seconds)</label>
+          <input type="number" min={0} max={600} value={form.health_timeout_secs} onChange={(e) => setForm({ ...form, health_timeout_secs: +e.target.value })} placeholder="0 = default (45s)" />
+        </div>
       </div>
       <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
         <input type="checkbox" style={{ width: "auto" }} checked={form.auto_deploy} onChange={(e) => setForm({ ...form, auto_deploy: e.target.checked })} />
         Auto-deploy on push
+      </label>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={form.auto_rollback} onChange={(e) => setForm({ ...form, auto_rollback: e.target.checked })} />
+        Auto-rollback to last good deploy if a deploy fails its health check
       </label>
       <button className="btn" style={{ marginTop: 12 }} disabled={!dirty || save.isPending} onClick={() => { setMsg(""); save.mutate(); }}>
         {save.isPending ? "Saving…" : "Save changes"}

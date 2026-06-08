@@ -165,6 +165,9 @@ func (s *Server) ingestEvent(serverID string, evt protocol.Event) {
 				_ = s.store.UpdateApp(app)
 			}
 		}
+		if ds.Phase == protocol.PhaseFailed {
+			go s.maybeAutoRollback(dep)
+		}
 
 	case protocol.EvtLog:
 		var ll protocol.LogLine

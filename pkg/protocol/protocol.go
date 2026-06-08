@@ -81,6 +81,13 @@ type DeployRequest struct {
 	ContainerPort int               `json:"container_port"`
 	EnvVars       map[string]string `json:"env_vars"`
 	ComposeFile   string            `json:"compose_file,omitempty"` // explicit -f path; "" = auto-detect
+
+	// Health gating. After the app starts, the agent waits for it to become
+	// healthy before reporting success; an unhealthy app fails the deploy (and
+	// the control plane may auto-roll-back). HealthPath, when set, is probed over
+	// HTTP inside the container (http://localhost:<port><path>).
+	HealthPath        string `json:"health_path,omitempty"`
+	HealthTimeoutSecs int    `json:"health_timeout_secs,omitempty"` // 0 = default (45s)
 }
 
 // RunCommandRequest is the payload for CmdRunCommand.
@@ -237,6 +244,7 @@ const (
 	PhaseBuilding    DeployPhase = "building"
 	PhaseStarting    DeployPhase = "starting"
 	PhaseConfiguring DeployPhase = "configuring"
+	PhaseHealthCheck DeployPhase = "health_check"
 	PhaseSuccess     DeployPhase = "success"
 	PhaseFailed      DeployPhase = "failed"
 )

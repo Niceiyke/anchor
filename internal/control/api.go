@@ -306,11 +306,14 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Branch        *string `json:"branch"`
-		Domain        *string `json:"domain"`
-		ContainerPort *int    `json:"container_port"`
-		AutoDeploy    *bool   `json:"auto_deploy"`
-		ComposeFile   *string `json:"compose_file"`
+		Branch            *string `json:"branch"`
+		Domain            *string `json:"domain"`
+		ContainerPort     *int    `json:"container_port"`
+		AutoDeploy        *bool   `json:"auto_deploy"`
+		ComposeFile       *string `json:"compose_file"`
+		HealthPath        *string `json:"health_path"`
+		HealthTimeoutSecs *int    `json:"health_timeout_secs"`
+		AutoRollback      *bool   `json:"auto_rollback"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -344,6 +347,19 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.ComposeFile = cf
+	}
+	if body.HealthPath != nil {
+		a.HealthPath = strings.TrimSpace(*body.HealthPath)
+	}
+	if body.HealthTimeoutSecs != nil {
+		if *body.HealthTimeoutSecs < 0 || *body.HealthTimeoutSecs > 600 {
+			http.Error(w, "health_timeout_secs out of range (0-600)", http.StatusBadRequest)
+			return
+		}
+		a.HealthTimeoutSecs = *body.HealthTimeoutSecs
+	}
+	if body.AutoRollback != nil {
+		a.AutoRollback = *body.AutoRollback
 	}
 	if err := s.store.UpdateApp(a); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

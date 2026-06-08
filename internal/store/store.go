@@ -79,7 +79,15 @@ type App struct {
 	EnvSecret     map[string]bool   `json:"env_secret,omitempty"`    // key -> secret? absent/true = masked, false = plain
 	ComposeFile   string            `json:"compose_file,omitempty"`  // explicit compose file path; "" = auto-detect
 	LastGoodSHA   string            `json:"last_good_sha,omitempty"` // for rollbacks
-	CreatedAt     time.Time         `json:"created_at"`
+
+	// Health gating (see protocol.DeployRequest). HealthPath is an optional HTTP
+	// path probed after start; AutoRollback redeploys LastGoodSHA when a deploy
+	// fails its health check.
+	HealthPath        string `json:"health_path,omitempty"`
+	HealthTimeoutSecs int    `json:"health_timeout_secs,omitempty"`
+	AutoRollback      bool   `json:"auto_rollback,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
 
 	// ContainerName is the docker container / compose-project name derived from
 	// Name. Computed on read (not persisted) so the UI can match the running

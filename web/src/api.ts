@@ -80,6 +80,9 @@ export interface App {
   container_name?: string;
   compose_file?: string;
   last_good_sha?: string;
+  health_path?: string;
+  health_timeout_secs?: number;
+  auto_rollback?: boolean;
   created_at: string;
 }
 
