@@ -38,7 +38,22 @@ esac
 
 if ! command -v docker >/dev/null 2>&1; then
   echo ">> Installing Docker"
-  curl -fsSL https://get.docker.com | sh
+  ID=""; [ -r /etc/os-release ] && . /etc/os-release
+  case "$ID" in
+    # get.docker.com doesn't support Amazon Linux; use the distro packages.
+    amzn)
+      if command -v dnf >/dev/null 2>&1; then
+        dnf install -y docker
+      elif command -v amazon-linux-extras >/dev/null 2>&1; then
+        amazon-linux-extras install -y docker
+      else
+        yum install -y docker
+      fi
+      ;;
+    *)
+      curl -fsSL https://get.docker.com | sh
+      ;;
+  esac
 fi
 systemctl enable --now docker >/dev/null 2>&1 || true
 
