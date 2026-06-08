@@ -1,9 +1,17 @@
 package control
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
 // Agent install assets served by the control plane so a fresh VPS can be
@@ -67,4 +75,60 @@ func (s *Server) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="anchor-agent"`)
 	_, _ = w.Write(bin)
+}
+
+// ---- Agent auto-update ------------------------------------------------------
+
+var (
+	agentSHAOnce sync.Once
+	agentSHAs    = map[string]string{} // arch -> sha256 of the bundled binary
+)
+
+// bundledAgentSHA returns the SHA-256 of the embedded agent binary for an arch,
+// or ok=false when no binary is bundled (e.g. a bare `go build`).
+func bundledAgentSHA(arch string) (string, bool) {
+	agentSHAOnce.Do(func() {
+		for _, a := range []string{"amd64", "arm64"} {
+			if b, err := agentBinFS.ReadFile("agentbin/anchor-agent-linux-" + a); err == nil {
+				sum := sha256.Sum256(b)
+				agentSHAs[a] = hex.EncodeToString(sum[:])
+			}
+		}
+	})
+	s, ok := agentSHAs[arch]
+	return s, ok
+}
+
+// maybeUpdateAgent compares the agent's running binary against the control
+// plane's bundled one and dispatches a self-update command when they differ.
+// A per-server cooldown prevents an update loop if the swap keeps failing.
+func (s *Server) maybeUpdateAgent(serverID string, h protocol.Hello) {
+	if h.Arch == "" || h.BinSHA == "" {
+		return // older agent that doesn't report its binary; nothing to do
+	}
+	want, ok := bundledAgentSHA(h.Arch)
+	if !ok || want == h.BinSHA {
+		return // no bundled binary for this arch, or already up to date
+	}
+
+	s.agentUpdateMu.Lock()
+	last := s.agentUpdated[serverID]
+	if time.Since(last) < 10*time.Minute {
+		s.agentUpdateMu.Unlock()
+		return
+	}
+	s.agentUpdated[serverID] = time.Now()
+	s.agentUpdateMu.Unlock()
+
+	data, _ := json.Marshal(protocol.UpdateAgentRequest{SHA256: want})
+	if s.hub.Send(serverID, protocol.Command{Type: protocol.CmdUpdateAgent, Data: data}) {
+		log.Printf("agent %s: pushing self-update (%s -> %s)", serverID, short(h.BinSHA), short(want))
+	}
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }

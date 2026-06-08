@@ -132,6 +132,12 @@ Docker network and a Caddy container that routes app domains, and registers a
 > `make run` and the production `Dockerfile`). A bare `go build` skips them, in
 > which case `/agent/download` reports that no binary is bundled.
 
+**Agent auto-update:** on every (re)connect the agent reports the SHA-256 of its
+own binary. When you rebuild/redeploy the control plane, it notices connected
+agents running an older binary and pushes a self-update — the agent re-downloads
+from `/agent/download`, verifies the hash, swaps its binary in place, and is
+restarted by systemd. No manual re-install needed to roll out agent changes.
+
 > **Behind Cloudflare?** Cloudflare's **Bot Fight Mode** blocks requests from
 > cloud/hosting IP ranges (AWS, GCP, etc.), so the `curl … | bash` install run
 > *from a VPS* gets a `403`. On the **Free** plan Bot Fight Mode can't be

@@ -27,20 +27,24 @@ type Server struct {
 
 	deployLocksMu sync.Mutex
 	deployLocks   map[string]struct{} // appID -> active deploy gate
+
+	agentUpdateMu sync.Mutex
+	agentUpdated  map[string]time.Time // serverID -> last self-update push (cooldown)
 }
 
 // New wires up the control plane. It ensures an admin credential exists.
 func New(st store.Store, adminUser, adminPass string) (*Server, error) {
 	s := &Server{
-		store:       st,
-		hub:         NewHub(),
-		auth:        newAuth(st),
-		live:        newBroadcaster(),
-		mux:         http.NewServeMux(),
-		pending:     map[string]chan protocol.Event{},
-		limiter:     newRateLimiter(),
-		cf:          newCFClient(),
-		deployLocks: map[string]struct{}{},
+		store:        st,
+		hub:          NewHub(),
+		auth:         newAuth(st),
+		live:         newBroadcaster(),
+		mux:          http.NewServeMux(),
+		pending:      map[string]chan protocol.Event{},
+		limiter:      newRateLimiter(),
+		cf:           newCFClient(),
+		deployLocks:  map[string]struct{}{},
+		agentUpdated: map[string]time.Time{},
 	}
 
 	settings, _ := st.Settings()

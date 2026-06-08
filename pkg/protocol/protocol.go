@@ -49,9 +49,17 @@ const (
 	CmdProvisionDB     CommandType = "provision_db"
 	CmdRemoveDB        CommandType = "remove_db"
 	CmdBackupDB        CommandType = "backup_db"
+	CmdUpdateAgent     CommandType = "update_agent"
 	CmdPing            CommandType = "ping"
 	CmdHello           CommandType = "hello"
 )
+
+// UpdateAgentRequest tells the agent to replace its own binary with the one the
+// control plane serves at /agent/download. SHA256 is the expected hash of the
+// new binary so the agent can verify the download before swapping.
+type UpdateAgentRequest struct {
+	SHA256 string `json:"sha256"`
+}
 
 // Command is a single instruction pushed to an agent over the stream.
 type Command struct {
@@ -195,9 +203,13 @@ const (
 )
 
 // Hello is the payload for CmdHello / EvtHello — sent by the control plane
-// on stream connect, answered by the agent with its own version.
+// on stream connect, answered by the agent with its own version. The agent's
+// reply also carries the architecture and SHA-256 of its running binary so the
+// control plane can offer an auto-update when it has a newer bundled binary.
 type Hello struct {
-	Version int `json:"version"`
+	Version int    `json:"version"`
+	Arch    string `json:"arch,omitempty"`    // agent reply: runtime.GOARCH (amd64|arm64)
+	BinSHA  string `json:"bin_sha,omitempty"` // agent reply: sha256 of the running binary
 }
 
 // Event is a single message reported by an agent.
