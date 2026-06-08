@@ -132,6 +132,15 @@ Docker network and a Caddy container that routes app domains, and registers a
 > `make run` and the production `Dockerfile`). A bare `go build` skips them, in
 > which case `/agent/download` reports that no binary is bundled.
 
+> **Behind Cloudflare?** Cloudflare's **Bot Fight Mode** blocks requests from
+> cloud/hosting IP ranges (AWS, GCP, etc.), so the `curl … | bash` install run
+> *from a VPS* gets a `403`. On the **Free** plan Bot Fight Mode can't be
+> exempted with a WAF rule — turn it off under **Security → Bots**. On **Pro+**,
+> *Super* Bot Fight Mode honors a WAF **Skip** rule scoped to
+> `http.request.uri.path eq "/install.sh" or starts_with(http.request.uri.path, "/agent/")`
+> (these endpoints are public by design — the agent token is what authorizes
+> enrollment). The dashboard's own origin (Caddy) never blocks them.
+
 ## Connecting GitHub
 
 Two options, in **Settings**:
