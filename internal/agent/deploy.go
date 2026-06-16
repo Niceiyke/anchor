@@ -187,13 +187,18 @@ func (a *Agent) deployDockerfile(ctx context.Context, req protocol.DeployRequest
 const anchorNetwork = "anchor_net"
 
 // writeEnvFile renders a .env file consumed by docker compose.
+// Values are double-quoted so that newlines, '#', and other special characters
+// are passed through literally. Backslashes and double quotes inside the value
+// are escaped so the quoting round-trips correctly.
 func writeEnvFile(dir string, env map[string]string) error {
 	if len(env) == 0 {
 		return nil
 	}
 	var b strings.Builder
 	for k, v := range env {
-		fmt.Fprintf(&b, "%s=%s\n", k, v)
+		escaped := strings.ReplaceAll(v, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		fmt.Fprintf(&b, "%s=\"%s\"\n", k, escaped)
 	}
 	return os.WriteFile(filepath.Join(dir, ".env"), []byte(b.String()), 0o600)
 }
