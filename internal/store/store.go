@@ -78,6 +78,7 @@ type App struct {
 	EnvVars       map[string]string `json:"env_vars"`
 	EnvSecret     map[string]bool   `json:"env_secret,omitempty"`    // key -> secret? absent/true = masked, false = plain
 	ComposeFile   string            `json:"compose_file,omitempty"`  // explicit compose file path; "" = auto-detect
+	Service       string            `json:"service,omitempty"`       // compose service to publish; "" = infer
 	LastGoodSHA   string            `json:"last_good_sha,omitempty"` // for rollbacks
 
 	// Health gating (see protocol.DeployRequest). HealthPath is an optional HTTP

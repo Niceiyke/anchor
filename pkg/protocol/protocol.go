@@ -82,6 +82,13 @@ type DeployRequest struct {
 	EnvVars       map[string]string `json:"env_vars"`
 	ComposeFile   string            `json:"compose_file,omitempty"` // explicit -f path; "" = auto-detect
 
+	// Service names the Compose service to publish (route to Caddy) and
+	// health-check. When empty the agent infers it: the single service that
+	// listens on ContainerPort, or the only service in the project. Naming it is
+	// the robust way to disambiguate a multi-service stack. Ignored for the
+	// Dockerfile stack (one container).
+	Service string `json:"service,omitempty"`
+
 	// Health gating. After the app starts, the agent waits for it to become
 	// healthy before reporting success; an unhealthy app fails the deploy (and
 	// the control plane may auto-roll-back). HealthPath, when set, is probed over

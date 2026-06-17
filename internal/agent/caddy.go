@@ -18,7 +18,7 @@ import (
 //
 // The snippet directory and reload command are configurable so the same agent
 // works whether Caddy runs on the host or as a container.
-func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest) error {
+func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest, host string, port int) error {
 	dir := a.cfg.CaddyDir
 	if dir == "" {
 		dir = "/etc/anchor/caddy/apps"
@@ -27,7 +27,7 @@ func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest) 
 		return err
 	}
 
-	upstream := fmt.Sprintf("%s:%d", sanitize(req.AppName), req.ContainerPort)
+	upstream := fmt.Sprintf("%s:%d", host, port)
 	// on_demand TLS lets Caddy obtain a cert for this domain on first request,
 	// gated by the control plane's /tls/check ask endpoint — so auto-assigned
 	// subdomains (and custom domains) get HTTPS without pre-provisioning.

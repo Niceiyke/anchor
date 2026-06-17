@@ -220,8 +220,8 @@ Open an app (**Applications → name**) for its full control surface:
 - **Rollback** — redeploy the last *successful* commit (shown when available).
 - **Stop** — stop & remove the app's container(s) (`compose down` / `rm -f`).
 - **Configuration** (collapsible) — edit branch, domain, container port,
-  compose file, and auto-deploy. Server and repo are immutable; changes apply
-  on the next deploy. (`PATCH /api/apps/{id}`)
+  compose file, the compose **service** to publish, and auto-deploy. Server and
+  repo are immutable; changes apply on the next deploy. (`PATCH /api/apps/{id}`)
 - **Environment & secrets** — add, edit, or remove env vars. Each var is 🔒
   **secret** (masked, the safe default) or 🔓 **plain** (shown) — toggle per
   variable, or "Reveal secrets" to peek. **Bulk import from .env** — paste a
@@ -298,10 +298,25 @@ the VPS and it's live.
 
 For `docker-compose` apps, the agent **auto-attaches** the web container to
 `anchor_net` with the app-name alias after `compose up` — no compose edits
-needed. It picks the service that exposes the app's **container port** (or the
-sole service); with multiple services and none exposing the port, it logs a hint
-to add `expose: ["<port>"]` to the web service. Make sure the app binds
-`0.0.0.0:<port>` (not `127.0.0.1`).
+needed. It picks which service to publish in this order:
+
+1. the app's **service** name, if set (most robust for multi-service stacks —
+   set it in the app's settings or `PATCH /api/apps/{id}` with `{"service": "web"}`);
+2. the single service that listens on the app's **container port**;
+3. the sole service, when the project has just one.
+
+If none of these resolve a service it logs which services it saw and asks you to
+set the `service` (or a matching port). The upstream **port** is the configured
+container port; if the chosen service doesn't expose it but exposes exactly one
+port, the agent routes to that port instead (and logs the adjustment), so you
+rarely need to repeat a port your image already declares. Make sure the app
+binds `0.0.0.0:<port>` (not `127.0.0.1`).
+
+> **Compose env vars:** vars set in Anchor are written to a `.env` next to the
+> compose file for `${VAR}` **interpolation only** — Compose does not inject them
+> into containers. A service receives them only if it references them via
+> `environment:` or `env_file: .env`. (Single-Dockerfile apps get them as
+> `docker run -e` and need no wiring.)
 
 ## Security
 

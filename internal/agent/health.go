@@ -15,11 +15,15 @@ import (
 // error once the timeout elapses. A returned error fails the deployment (and may
 // trigger an auto-rollback on the control plane). When the app container can't
 // be identified it returns nil — we don't fail a deploy we can't evaluate.
-func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest) error {
-	container := a.resolveContainer(ctx, req)
+func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest, target routeTarget) error {
+	container := target.container
 	if container == "" {
 		a.emitLog(req.DeploymentID, "", "system", "WARN: could not identify app container; skipping health gate")
 		return nil
+	}
+	port := target.port
+	if port == 0 {
+		port = req.ContainerPort
 	}
 
 	timeout := time.Duration(req.HealthTimeoutSecs) * time.Second
@@ -38,7 +42,7 @@ func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest) erro
 			lastErr = err
 		case st.health == "healthy":
 			a.emitLog(req.DeploymentID, "", "system", "Health check passed (docker healthcheck reports healthy)")
-			return a.httpProbe(ctx, req, container)
+			return a.httpProbe(ctx, req, container, port)
 		case st.health == "unhealthy":
 			lastErr = fmt.Errorf("container reports unhealthy")
 		case st.health == "starting":
@@ -50,7 +54,7 @@ func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest) erro
 		default:
 			// Running, no docker healthcheck defined. An optional HTTP path probe
 			// is the only remaining gate; if it passes (or none is set), we're good.
-			if perr := a.httpProbe(ctx, req, container); perr == nil {
+			if perr := a.httpProbe(ctx, req, container, port); perr == nil {
 				a.emitLog(req.DeploymentID, "", "system", "Health check passed")
 				return nil
 			} else {
@@ -72,7 +76,7 @@ func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest) erro
 // httpProbe checks req.HealthPath over HTTP from inside the container. It's
 // best-effort: if the image ships neither wget nor curl, it warns and passes
 // (container-state gating still applies). A non-2xx/conn error fails the gate.
-func (a *Agent) httpProbe(ctx context.Context, req protocol.DeployRequest, container string) error {
+func (a *Agent) httpProbe(ctx context.Context, req protocol.DeployRequest, container string, port int) error {
 	if req.HealthPath == "" {
 		return nil
 	}
@@ -80,7 +84,7 @@ func (a *Agent) httpProbe(ctx context.Context, req protocol.DeployRequest, conta
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	url := fmt.Sprintf("http://localhost:%d%s", req.ContainerPort, path)
+	url := fmt.Sprintf("http://localhost:%d%s", port, path)
 	script := fmt.Sprintf(
 		`if command -v wget >/dev/null 2>&1; then wget -q -T 5 -O /dev/null %q; `+
 			`elif command -v curl >/dev/null 2>&1; then curl -fsS -m 5 -o /dev/null %q; `+
@@ -96,36 +100,6 @@ func (a *Agent) httpProbe(ctx context.Context, req protocol.DeployRequest, conta
 	}
 	a.emitLog(req.DeploymentID, "", "system", "Health check passed: "+url)
 	return nil
-}
-
-// resolveContainer finds the docker container to health-check: the named
-// single container (Dockerfile path) or the web service of the compose project.
-func (a *Agent) resolveContainer(ctx context.Context, req protocol.DeployRequest) string {
-	name := sanitize(req.AppName)
-	if containerExists(ctx, name) {
-		return name
-	}
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-q",
-		"--filter", "label=com.docker.compose.project="+name).Output()
-	if err != nil {
-		return ""
-	}
-	ids := strings.Fields(strings.TrimSpace(string(out)))
-	switch {
-	case len(ids) == 0:
-		return ""
-	case len(ids) == 1:
-		return ids[0]
-	}
-	if id := a.pickWebContainer(ctx, ids, req.ContainerPort); id != "" {
-		return id
-	}
-	return ids[0]
-}
-
-func containerExists(ctx context.Context, name string) bool {
-	out, err := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.Id}}", name).Output()
-	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
 type containerState struct {

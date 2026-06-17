@@ -44,6 +44,7 @@ func (s *Server) triggerDeploy(app store.App, commitSHA string) (store.Deploymen
 		ContainerPort:     app.ContainerPort,
 		EnvVars:           app.EnvVars,
 		ComposeFile:       app.ComposeFile,
+		Service:           app.Service,
 		HealthPath:        app.HealthPath,
 		HealthTimeoutSecs: app.HealthTimeoutSecs,
 	}

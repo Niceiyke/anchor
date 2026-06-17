@@ -269,6 +269,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid compose file path", http.StatusBadRequest)
 		return
 	}
+	a.Service = strings.TrimSpace(a.Service)
 	// Auto-assign a subdomain under the base domain when none was provided.
 	a.Domain = strings.TrimSpace(a.Domain)
 	if a.Domain == "" {
@@ -311,6 +312,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		ContainerPort     *int    `json:"container_port"`
 		AutoDeploy        *bool   `json:"auto_deploy"`
 		ComposeFile       *string `json:"compose_file"`
+		Service           *string `json:"service"`
 		HealthPath        *string `json:"health_path"`
 		HealthTimeoutSecs *int    `json:"health_timeout_secs"`
 		AutoRollback      *bool   `json:"auto_rollback"`
@@ -347,6 +349,9 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.ComposeFile = cf
+	}
+	if body.Service != nil {
+		a.Service = strings.TrimSpace(*body.Service)
 	}
 	if body.HealthPath != nil {
 		a.HealthPath = strings.TrimSpace(*body.HealthPath)
