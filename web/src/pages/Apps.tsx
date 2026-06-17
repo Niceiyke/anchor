@@ -52,8 +52,10 @@ export function Apps() {
     },
   });
 
+  // The quick list action keeps volumes (data is preserved); deleting volumes is
+  // a deliberate choice made from the app's Danger zone.
   const remove = useMutation({
-    mutationFn: (id: string) => api.del(`/api/apps/${id}`),
+    mutationFn: (id: string) => api.del(`/api/apps/${id}?keep_volume=true`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
   });
 
@@ -162,7 +164,7 @@ export function Apps() {
                   className="btn secondary"
                   style={{ padding: "2px 8px", fontSize: 12 }}
                   disabled={remove.isPending}
-                  onClick={() => { if (confirm(`Delete app "${a.name}"? Its container(s) will be stopped and removed.`)) remove.mutate(a.id); }}
+                  onClick={() => { if (confirm(`Delete app "${a.name}"? Its container(s) will be stopped and removed; volumes are kept (delete those from the app's Danger zone).`)) remove.mutate(a.id); }}
                 >
                   Delete
                 </button>

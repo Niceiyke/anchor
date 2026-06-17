@@ -236,8 +236,9 @@ Open an app (**Applications → name**) for its full control surface:
   container(s) on the server. Volumes are deleted too by default (`compose
   down -v` / `rm -fv`); tick **Keep volumes** to preserve the data (the API
   opt-out is `DELETE /api/apps/{id}?keep_volume=true`). An attached managed
-  database lives in its own volume and is never touched. Also available as a row
-  action on the Apps list.
+  database lives in its own volume and is never touched. The Apps-list row
+  action also deletes the app but **keeps** volumes — removing data is a
+  deliberate choice made here in the Danger zone.
 
 ## Terminal
 
