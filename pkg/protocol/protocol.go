@@ -68,6 +68,21 @@ type Command struct {
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
+// Route publishes one Compose service on one public domain. An app may have
+// several, so a multi-service stack can expose e.g. app.example.com -> web and
+// api.example.com -> api. Port 0 means "auto-detect from the service's exposed
+// port". Service is required when an app has more than one route (it's how the
+// agent tells the services apart).
+type Route struct {
+	Domain  string `json:"domain"`
+	Service string `json:"service,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	// HealthPath, when set, is probed over HTTP inside this route's container
+	// after start (http://localhost:<port><path>). Empty means container-state
+	// gating only. The primary route falls back to the app-level HealthPath.
+	HealthPath string `json:"health_path,omitempty"`
+}
+
 // DeployRequest is the payload for CmdDeploy.
 type DeployRequest struct {
 	DeploymentID  string            `json:"deployment_id"`
@@ -81,6 +96,19 @@ type DeployRequest struct {
 	ContainerPort int               `json:"container_port"`
 	EnvVars       map[string]string `json:"env_vars"`
 	ComposeFile   string            `json:"compose_file,omitempty"` // explicit -f path; "" = auto-detect
+
+	// Service names the Compose service to publish (route to Caddy) and
+	// health-check. When empty the agent infers it: the single service that
+	// listens on ContainerPort, or the only service in the project. Naming it is
+	// the robust way to disambiguate a multi-service stack. Ignored for the
+	// Dockerfile stack (one container).
+	Service string `json:"service,omitempty"`
+
+	// Routes publishes additional services on their own domains (multi-service
+	// apps). When empty the single Domain/Service/ContainerPort above is the only
+	// route. When set, it is the complete list of public routes; the agent still
+	// health-checks the first one as the app's primary.
+	Routes []Route `json:"routes,omitempty"`
 
 	// Health gating. After the app starts, the agent waits for it to become
 	// healthy before reporting success; an unhealthy app fails the deploy (and
@@ -116,9 +144,14 @@ type ListContainersRequest struct {
 	RequestID string `json:"request_id"`
 }
 
-// StopAppRequest is the payload for CmdStopApp.
+// StopAppRequest is the payload for CmdStopApp. RemoveVolumes additionally
+// deletes the app's Docker volumes (Compose project volumes via `down -v`, and
+// anonymous volumes via `rm -fv`) — used when deleting an app, not when merely
+// stopping it. An attached managed database lives in its own container/volume,
+// so it is unaffected.
 type StopAppRequest struct {
-	AppName string `json:"app_name"`
+	AppName       string `json:"app_name"`
+	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
 }
 
 // ContainerActionRequest is the payload for CmdContainerAction. The reply is an

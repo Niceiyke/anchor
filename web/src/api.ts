@@ -65,6 +65,13 @@ export interface Server {
   created_at: string;
 }
 
+export interface Route {
+  domain: string;
+  service?: string;
+  port?: number;
+  health_path?: string;
+}
+
 export interface App {
   id: string;
   name: string;
@@ -79,6 +86,8 @@ export interface App {
   env_secret?: Record<string, boolean>;
   container_name?: string;
   compose_file?: string;
+  service?: string;
+  routes?: Route[];
   last_good_sha?: string;
   health_path?: string;
   health_timeout_secs?: number;

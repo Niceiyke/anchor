@@ -269,18 +269,27 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid compose file path", http.StatusBadRequest)
 		return
 	}
+	a.Service = strings.TrimSpace(a.Service)
 	// Auto-assign a subdomain under the base domain when none was provided.
 	a.Domain = strings.TrimSpace(a.Domain)
 	if a.Domain == "" {
 		a.Domain = s.assignDomain(a.Name)
 	}
+	routes, err := s.normalizeRoutes(a.Name, a.Domain, a.Routes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	a.Routes = routes
 	a.ID = "app_" + randToken()[:12]
 	a.CreatedAt = time.Now()
 	if err := s.store.CreateApp(a); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go s.cfEnsureDomain(a.Domain, a.ServerID) // best-effort Cloudflare A record
+	for _, d := range appDomains(a) {
+		go s.cfEnsureDomain(d, a.ServerID) // best-effort Cloudflare A records
+	}
 	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusCreated, a)
 }
@@ -305,15 +314,18 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	oldDomains := appDomains(a)
 	var body struct {
-		Branch            *string `json:"branch"`
-		Domain            *string `json:"domain"`
-		ContainerPort     *int    `json:"container_port"`
-		AutoDeploy        *bool   `json:"auto_deploy"`
-		ComposeFile       *string `json:"compose_file"`
-		HealthPath        *string `json:"health_path"`
-		HealthTimeoutSecs *int    `json:"health_timeout_secs"`
-		AutoRollback      *bool   `json:"auto_rollback"`
+		Branch            *string           `json:"branch"`
+		Domain            *string           `json:"domain"`
+		ContainerPort     *int              `json:"container_port"`
+		AutoDeploy        *bool             `json:"auto_deploy"`
+		ComposeFile       *string           `json:"compose_file"`
+		Service           *string           `json:"service"`
+		Routes            *[]protocol.Route `json:"routes"`
+		HealthPath        *string           `json:"health_path"`
+		HealthTimeoutSecs *int              `json:"health_timeout_secs"`
+		AutoRollback      *bool             `json:"auto_rollback"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -326,7 +338,6 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		a.Branch = strings.TrimSpace(*body.Branch)
 	}
-	oldDomain := a.Domain
 	if body.Domain != nil {
 		a.Domain = strings.TrimSpace(*body.Domain)
 	}
@@ -348,6 +359,17 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		a.ComposeFile = cf
 	}
+	if body.Service != nil {
+		a.Service = strings.TrimSpace(*body.Service)
+	}
+	if body.Routes != nil {
+		routes, err := s.normalizeRoutes(a.Name, a.Domain, *body.Routes)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		a.Routes = routes
+	}
 	if body.HealthPath != nil {
 		a.HealthPath = strings.TrimSpace(*body.HealthPath)
 	}
@@ -365,11 +387,23 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if a.Domain != oldDomain {
-		if oldDomain != "" {
-			go s.cfDeleteDomain(oldDomain)
+	// Reconcile DNS for the app's full domain set: add new, remove dropped.
+	newDomains := appDomains(a)
+	newSet := map[string]bool{}
+	for _, d := range newDomains {
+		newSet[d] = true
+	}
+	oldSet := map[string]bool{}
+	for _, d := range oldDomains {
+		oldSet[d] = true
+		if !newSet[d] {
+			go s.cfDeleteDomain(d)
 		}
-		go s.cfEnsureDomain(a.Domain, a.ServerID)
+	}
+	for _, d := range newDomains {
+		if !oldSet[d] {
+			go s.cfEnsureDomain(d, a.ServerID)
+		}
 	}
 	a.ContainerName = protocol.Sanitize(a.Name)
 	writeJSON(w, http.StatusOK, a)
@@ -380,10 +414,14 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	// Best-effort: stop/remove the running container(s) on the agent so we don't
 	// orphan them, then delete the record.
 	if a, err := s.store.GetApp(id); err == nil {
-		payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name})
+		// Volumes are removed by default; opt out with ?keep_volume=true.
+		removeVolumes := r.URL.Query().Get("keep_volume") != "true"
+		payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name, RemoveVolumes: removeVolumes})
 		cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdStopApp, Data: payload}
 		s.hub.Send(a.ServerID, cmd) // best-effort; agent may be offline
-		go s.cfDeleteDomain(a.Domain)
+		for _, d := range appDomains(a) {
+			go s.cfDeleteDomain(d)
+		}
 	}
 	_ = s.store.DeleteApp(id)
 	w.WriteHeader(http.StatusNoContent)

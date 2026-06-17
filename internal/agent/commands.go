@@ -209,11 +209,20 @@ func (a *Agent) systemPrune(ctx context.Context, req protocol.SystemPruneRequest
 	})
 }
 
-// stopApp stops and removes an app's container(s).
+// stopApp stops and removes an app's container(s). When RemoveVolumes is set
+// (app deletion) it also drops the app's volumes: `compose down -v` clears the
+// project's named + anonymous volumes, and `rm -fv` the single-container case.
+// An attached managed database is a separate project, so it's untouched.
 func (a *Agent) stopApp(ctx context.Context, req protocol.StopAppRequest) {
 	name := sanitize(req.AppName)
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
-	_ = exec.CommandContext(ctx, "docker", "compose", "-p", name, "down").Run()
+	rmArgs := []string{"rm", "-f", name}
+	downArgs := []string{"compose", "-p", name, "down"}
+	if req.RemoveVolumes {
+		rmArgs = []string{"rm", "-fv", name}
+		downArgs = append(downArgs, "-v")
+	}
+	_ = exec.CommandContext(ctx, "docker", rmArgs...).Run()
+	_ = exec.CommandContext(ctx, "docker", downArgs...).Run()
 }
 
 func (a *Agent) pipeReqLogs(requestID, stream string, r io.Reader) {

@@ -219,9 +219,10 @@ Open an app (**Applications → name**) for its full control surface:
   deployment in the list). Empty/manual deployments redeploy latest.
 - **Rollback** — redeploy the last *successful* commit (shown when available).
 - **Stop** — stop & remove the app's container(s) (`compose down` / `rm -f`).
+  Volumes are **kept** — stopping never destroys data.
 - **Configuration** (collapsible) — edit branch, domain, container port,
-  compose file, and auto-deploy. Server and repo are immutable; changes apply
-  on the next deploy. (`PATCH /api/apps/{id}`)
+  compose file, the compose **service** to publish, and auto-deploy. Server and
+  repo are immutable; changes apply on the next deploy. (`PATCH /api/apps/{id}`)
 - **Environment & secrets** — add, edit, or remove env vars. Each var is 🔒
   **secret** (masked, the safe default) or 🔓 **plain** (shown) — toggle per
   variable, or "Reveal secrets" to peek. **Bulk import from .env** — paste a
@@ -232,7 +233,12 @@ Open an app (**Applications → name**) for its full control surface:
   the Apps list) derived from the agent's container list. Works for both
   Dockerfile (`<name>`) and Compose (`<name>-<service>-N`) apps.
 - **Danger zone → Delete app** — removes the app *and* stops/removes its
-  container(s) on the server. Also available as a row action on the Apps list.
+  container(s) on the server. Volumes are deleted too by default (`compose
+  down -v` / `rm -fv`); tick **Keep volumes** to preserve the data (the API
+  opt-out is `DELETE /api/apps/{id}?keep_volume=true`). An attached managed
+  database lives in its own volume and is never touched. The Apps-list row
+  action also deletes the app but **keeps** volumes — removing data is a
+  deliberate choice made here in the Danger zone.
 
 ## Terminal
 
@@ -291,17 +297,47 @@ instead. Both implement the same `store.Store` interface.
 
 ## Routing & HTTPS
 
-Each VPS runs Caddy on `anchor_net`. On deploy the agent writes
-`<domain> { reverse_proxy <app>:<port> }` to `/etc/anchor/caddy/apps/<app>.caddy`
-and reloads Caddy, which provisions TLS automatically. Point the domain's DNS at
-the VPS and it's live.
+Each VPS runs Caddy on `anchor_net`. On deploy the agent writes a
+`<domain> { reverse_proxy <upstream> }` block per route into a single
+`/etc/anchor/caddy/apps/<app>.caddy` file (rewritten atomically each deploy, so
+stale routes can't linger) and reloads Caddy, which provisions TLS
+automatically. Point each domain's DNS at the VPS and it's live.
 
-For `docker-compose` apps, the agent **auto-attaches** the web container to
-`anchor_net` with the app-name alias after `compose up` — no compose edits
-needed. It picks the service that exposes the app's **container port** (or the
-sole service); with multiple services and none exposing the port, it logs a hint
-to add `expose: ["<port>"]` to the web service. Make sure the app binds
-`0.0.0.0:<port>` (not `127.0.0.1`).
+### Multiple services on multiple domains
+
+A Compose app can publish more than one service, each on its own domain — e.g.
+`app.example.com → web` and `api.example.com → api`. Set **routes** on the app
+(`PATCH /api/apps/{id}` with
+`{"routes":[{"service":"web","domain":"app.example.com"},{"service":"api","domain":"api.example.com","port":8080}]}`).
+Each route needs a `service`; `port` is optional (auto-detected like below); an
+empty `domain` is auto-assigned a `<app>-<service>.<base_domain>` subdomain when a
+base domain is configured. Routed services get a per-service `<app>-<service>`
+alias on `anchor_net`; a single-route app keeps the bare `<app>` alias. The
+control plane approves every route domain for on-demand TLS and provisions a
+Cloudflare A record for each. The health gate checks **every** routed service
+(a broken secondary fails the deploy); each route may set its own `health_path`,
+and the first route also inherits the app-level health path.
+
+When no routes are set, the single Domain/Service/ContainerPort is the one
+route. The agent picks which service to publish in this order:
+
+1. the app's **service** name, if set (most robust for multi-service stacks —
+   set it in the app's settings or `PATCH /api/apps/{id}` with `{"service": "web"}`);
+2. the single service that listens on the app's **container port**;
+3. the sole service, when the project has just one.
+
+If none of these resolve a service it logs which services it saw and asks you to
+set the `service` (or a matching port). The upstream **port** is the configured
+container port; if the chosen service doesn't expose it but exposes exactly one
+port, the agent routes to that port instead (and logs the adjustment), so you
+rarely need to repeat a port your image already declares. Make sure the app
+binds `0.0.0.0:<port>` (not `127.0.0.1`).
+
+> **Compose env vars:** vars set in Anchor are written to a `.env` next to the
+> compose file for `${VAR}` **interpolation only** — Compose does not inject them
+> into containers. A service receives them only if it references them via
+> `environment:` or `env_file: .env`. (Single-Dockerfile apps get them as
+> `docker run -e` and need no wiring.)
 
 ## Security
 
