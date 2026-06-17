@@ -49,8 +49,12 @@ internal/store       persistence: SQLite (default) + JSON, behind Store interfac
 pkg/protocol         shared command/event message types
 web/                 React + TanStack Router + Query dashboard
 deploy/              Caddyfiles for control plane + per-VPS app router
+docs/                guides (e.g. writing-apps.md)
 scripts/             install-agent.sh
 ```
+
+> Writing an app to deploy here? See **[docs/writing-apps.md](docs/writing-apps.md)**
+> — Dockerfile/compose best practices for routing, ports, health, env, and volumes.
 
 ## Quickstart (local dev)
 
@@ -296,6 +300,9 @@ Set `ANCHOR_DB` to a path ending in `.json` to use the simple JSON store
 instead. Both implement the same `store.Store` interface.
 
 ## Routing & HTTPS
+
+> See **[docs/writing-apps.md](docs/writing-apps.md)** for Dockerfile/compose
+> best practices that make routing, ports, and health "just work".
 
 Each VPS runs Caddy on `anchor_net`. On deploy the agent writes a
 `<domain> { reverse_proxy <upstream> }` block per route into a single
