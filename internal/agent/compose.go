@@ -20,11 +20,14 @@ type routeTarget struct {
 }
 
 // resolvedRoute is one public route ready for Caddy: a domain pointing at a
-// host:port reachable on anchor_net.
+// host:port reachable on anchor_net. It also carries the backing container and
+// optional health path so the deploy can gate each routed service.
 type resolvedRoute struct {
-	domain string
-	host   string // network alias / container name
-	port   int
+	domain     string
+	host       string // network alias / container name
+	port       int
+	container  string // backing container id (for health gating)
+	healthPath string // optional per-route HTTP health path
 }
 
 // effectiveRoutes is the complete list of public routes for a deploy. Explicit
@@ -159,7 +162,10 @@ func (a *Agent) resolveComposeRoutes(ctx context.Context, req protocol.DeployReq
 				"Routed %s → %s:%d on %s (service %q, container %s)",
 				r.Domain, alias, port, anchorNetwork, target.service, short12(target.id)))
 		}
-		routes = append(routes, resolvedRoute{domain: r.Domain, host: alias, port: port})
+		routes = append(routes, resolvedRoute{
+			domain: r.Domain, host: alias, port: port,
+			container: target.id, healthPath: r.HealthPath,
+		})
 		if primary.container == "" {
 			primary = routeTarget{container: target.id, host: alias, port: port}
 		}

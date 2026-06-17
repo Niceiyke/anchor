@@ -308,8 +308,9 @@ empty `domain` is auto-assigned a `<app>-<service>.<base_domain>` subdomain when
 base domain is configured. Routed services get a per-service `<app>-<service>`
 alias on `anchor_net`; a single-route app keeps the bare `<app>` alias. The
 control plane approves every route domain for on-demand TLS and provisions a
-Cloudflare A record for each. The **first** route is the app's primary and is
-what the health gate checks.
+Cloudflare A record for each. The health gate checks **every** routed service
+(a broken secondary fails the deploy); each route may set its own `health_path`,
+and the first route also inherits the app-level health path.
 
 When no routes are set, the single Domain/Service/ContainerPort is the one
 route. The agent picks which service to publish in this order:

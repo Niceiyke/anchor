@@ -41,6 +41,7 @@ func (s *Server) normalizeRoutes(appName, primaryDomain string, routes []protoco
 	for _, r := range routes {
 		r.Service = strings.TrimSpace(r.Service)
 		r.Domain = normalizeBaseDomain(r.Domain)
+		r.HealthPath = strings.TrimSpace(r.HealthPath)
 		if r.Service == "" {
 			return nil, fmt.Errorf("each route needs a service")
 		}

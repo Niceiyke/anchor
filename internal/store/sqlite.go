@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS apps (
 	compose_file   TEXT NOT NULL DEFAULT '',
 	service        TEXT NOT NULL DEFAULT '',
 	routes         TEXT NOT NULL DEFAULT '[]',
+	health_path    TEXT NOT NULL DEFAULT '',
+	health_timeout INTEGER NOT NULL DEFAULT 0,
+	auto_rollback  INTEGER NOT NULL DEFAULT 0,
 	env_secret     TEXT NOT NULL DEFAULT '{}',
 	created_at     TEXT NOT NULL
 );
@@ -138,6 +141,9 @@ CREATE TABLE IF NOT EXISTS users (
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN compose_file TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN service TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN routes TEXT NOT NULL DEFAULT '[]'`)
+		s.db.Exec(`ALTER TABLE apps ADD COLUMN health_path TEXT NOT NULL DEFAULT ''`)
+		s.db.Exec(`ALTER TABLE apps ADD COLUMN health_timeout INTEGER NOT NULL DEFAULT 0`)
+		s.db.Exec(`ALTER TABLE apps ADD COLUMN auto_rollback INTEGER NOT NULL DEFAULT 0`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN env_secret TEXT NOT NULL DEFAULT '{}'`)
 		s.db.Exec(`ALTER TABLE servers ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`)
 	}
@@ -269,12 +275,14 @@ func (s *sqliteStore) DeleteServer(id string) error {
 func scanApp(r scanner) (App, error) {
 	var v App
 	var envRaw, routesRaw, secretRaw, createdAt string
-	var auto int
+	var auto, autoRB int
 	if err := r.Scan(&v.ID, &v.Name, &v.ServerID, &v.RepoFullName, &v.RepoURL, &v.Branch,
-		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &v.ComposeFile, &v.Service, &routesRaw, &secretRaw, &createdAt); err != nil {
+		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &v.ComposeFile, &v.Service, &routesRaw,
+		&v.HealthPath, &v.HealthTimeoutSecs, &autoRB, &secretRaw, &createdAt); err != nil {
 		return v, err
 	}
 	v.AutoDeploy = auto == 1
+	v.AutoRollback = autoRB == 1
 	v.CreatedAt = tsParse(createdAt)
 	v.EnvVars = map[string]string{}
 	_ = json.Unmarshal([]byte(envRaw), &v.EnvVars)
@@ -284,7 +292,7 @@ func scanApp(r scanner) (App, error) {
 	return v, nil
 }
 
-const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, compose_file, service, routes, env_secret, created_at`
+const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, compose_file, service, routes, health_path, health_timeout, auto_rollback, env_secret, created_at`
 
 func (s *sqliteStore) ListApps() ([]App, error) {
 	rows, err := s.db.Query(`SELECT ` + appCols + ` FROM apps ORDER BY created_at`)
@@ -330,15 +338,17 @@ func (s *sqliteStore) AppsByRepo(fullName string) ([]App, error) {
 }
 
 func (s *sqliteStore) CreateApp(v App) error {
-	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.ID, v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain,
-		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, routesJSON(v.Routes), secretJSON(v.EnvSecret), tsFmt(v.CreatedAt))
+		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, routesJSON(v.Routes),
+		v.HealthPath, v.HealthTimeoutSecs, b2i(v.AutoRollback), secretJSON(v.EnvSecret), tsFmt(v.CreatedAt))
 	return err
 }
 
 func (s *sqliteStore) UpdateApp(v App) error {
-	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=?, compose_file=?, service=?, routes=?, env_secret=? WHERE id=?`,
-		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, routesJSON(v.Routes), secretJSON(v.EnvSecret), v.ID)
+	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=?, compose_file=?, service=?, routes=?, health_path=?, health_timeout=?, auto_rollback=?, env_secret=? WHERE id=?`,
+		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, routesJSON(v.Routes),
+		v.HealthPath, v.HealthTimeoutSecs, b2i(v.AutoRollback), secretJSON(v.EnvSecret), v.ID)
 	return affected(res, err)
 }
 

@@ -29,6 +29,38 @@ func TestEffectiveRoutes(t *testing.T) {
 	}
 }
 
+func TestBuildHealthTargets(t *testing.T) {
+	// Multi-service: one target per routed container; primary inherits app path,
+	// secondary uses its own.
+	routes := []resolvedRoute{
+		{domain: "app.example.com", host: "blog-web", port: 3000, container: "c1"},
+		{domain: "api.example.com", host: "blog-api", port: 8080, container: "c2", healthPath: "/healthz"},
+	}
+	got := buildHealthTargets(protocol.DeployRequest{HealthPath: "/health"}, routes, routeTarget{container: "c1"})
+	if len(got) != 2 {
+		t.Fatalf("want 2 targets, got %d", len(got))
+	}
+	if got[0].container != "c1" || got[0].path != "/health" {
+		t.Errorf("primary target = %+v (want path inherited from app)", got[0])
+	}
+	if got[1].container != "c2" || got[1].path != "/healthz" {
+		t.Errorf("secondary target = %+v (want its own path)", got[1])
+	}
+
+	// No route containers (Dockerfile / no public routes): single primary, port
+	// falls back to the app container port.
+	got = buildHealthTargets(protocol.DeployRequest{AppName: "shop", ContainerPort: 3000, HealthPath: "/h"},
+		nil, routeTarget{container: "shop"})
+	if len(got) != 1 || got[0].container != "shop" || got[0].port != 3000 || got[0].path != "/h" {
+		t.Fatalf("dockerfile target = %+v", got)
+	}
+
+	// Nothing identifiable -> no targets (health gate skipped).
+	if got := buildHealthTargets(protocol.DeployRequest{}, nil, routeTarget{}); got != nil {
+		t.Errorf("want nil targets, got %+v", got)
+	}
+}
+
 func TestRouteAlias(t *testing.T) {
 	if got := routeAlias("blog", "web", false); got != "blog" {
 		t.Errorf("single-route alias = %q, want %q", got, "blog")

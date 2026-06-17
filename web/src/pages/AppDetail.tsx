@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type App, type Deployment, type LogLine, type Database } from "../api";
+import { api, type App, type Route, type Deployment, type LogLine, type Database } from "../api";
 import { RunningBadge } from "../components/RunningBadge";
 
 export function AppDetail() {
@@ -75,6 +75,10 @@ export function AppDetail() {
             ? <a href={`https://${app.domain}`} target="_blank" rel="noreferrer">{app.domain} ↗</a>
             : "no domain"} · port {app.container_port}
           {app.compose_file && <span> · compose: <code>{app.compose_file}</code></span>}
+          {app.service && <span> · service: <code>{app.service}</code></span>}
+          {(app.routes ?? []).map((r) => (
+            <span key={r.domain}> · <a href={`https://${r.domain}`} target="_blank" rel="noreferrer">{r.domain} ↗</a>{r.service ? ` (${r.service})` : ""}</span>
+          ))}
           {app.last_good_sha && <span> · rollback: <code>{app.last_good_sha.slice(0, 7)}</code></span>}
         </div>
       )}
@@ -162,6 +166,8 @@ function AppSettings({ app }: { app: App }) {
     container_port: app.container_port,
     auto_deploy: app.auto_deploy,
     compose_file: app.compose_file ?? "",
+    service: app.service ?? "",
+    routes: (app.routes ?? []) as Route[],
     health_path: app.health_path ?? "",
     health_timeout_secs: app.health_timeout_secs ?? 0,
     auto_rollback: app.auto_rollback ?? false,
@@ -174,9 +180,16 @@ function AppSettings({ app }: { app: App }) {
     form.container_port !== app.container_port ||
     form.auto_deploy !== app.auto_deploy ||
     (form.compose_file ?? "") !== (app.compose_file ?? "") ||
+    (form.service ?? "") !== (app.service ?? "") ||
+    JSON.stringify(form.routes) !== JSON.stringify(app.routes ?? []) ||
     (form.health_path ?? "") !== (app.health_path ?? "") ||
     form.health_timeout_secs !== (app.health_timeout_secs ?? 0) ||
     form.auto_rollback !== (app.auto_rollback ?? false);
+
+  const setRoute = (i: number, patch: Partial<Route>) =>
+    setForm((f) => ({ ...f, routes: f.routes.map((r, j) => (j === i ? { ...r, ...patch } : r)) }));
+  const addRoute = () => setForm((f) => ({ ...f, routes: [...f.routes, { service: "", domain: "", port: 0 }] }));
+  const removeRoute = (i: number) => setForm((f) => ({ ...f, routes: f.routes.filter((_, j) => j !== i) }));
 
   const save = useMutation({
     mutationFn: () => api.patch<App>(`/api/apps/${app.id}`, form),
@@ -212,6 +225,10 @@ function AppSettings({ app }: { app: App }) {
           <input value={form.compose_file} onChange={(e) => setForm({ ...form, compose_file: e.target.value })} placeholder="auto-detect — or e.g. docker-compose.prod.yml" />
         </div>
         <div>
+          <label>Service (compose)</label>
+          <input value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} placeholder="auto — or the web service name, e.g. web" />
+        </div>
+        <div>
           <label>Health check path</label>
           <input value={form.health_path} onChange={(e) => setForm({ ...form, health_path: e.target.value })} placeholder="optional — e.g. /healthz" />
         </div>
@@ -220,6 +237,25 @@ function AppSettings({ app }: { app: App }) {
           <input type="number" min={0} max={600} value={form.health_timeout_secs} onChange={(e) => setForm({ ...form, health_timeout_secs: +e.target.value })} placeholder="0 = default (45s)" />
         </div>
       </div>
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 16, paddingTop: 12 }}>
+        <label style={{ marginBottom: 0 }}>Extra routes (multi-service apps)</label>
+        <p className="muted" style={{ marginTop: 4 }}>
+          Publish more Compose services on their own domains — e.g. <code>web</code> on the domain above and
+          <code> api</code> here. Each route needs a service; port is optional (auto-detected); leave domain blank to
+          auto-assign a subdomain. The domain above is the primary route.
+        </p>
+        {form.routes.map((r, i) => (
+          <div className="row" key={i} style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <input style={{ flex: 1, minWidth: 120 }} placeholder="service (e.g. api)" value={r.service ?? ""} onChange={(e) => setRoute(i, { service: e.target.value })} />
+            <input style={{ flex: 2, minWidth: 160 }} placeholder="domain — blank = auto-assign" value={r.domain} onChange={(e) => setRoute(i, { domain: e.target.value })} />
+            <input style={{ width: 90 }} type="number" min={0} max={65535} placeholder="port" value={r.port || ""} onChange={(e) => setRoute(i, { port: +e.target.value })} />
+            <input style={{ flex: 1, minWidth: 120 }} placeholder="health path (opt.)" value={r.health_path ?? ""} onChange={(e) => setRoute(i, { health_path: e.target.value })} />
+            <button className="btn secondary" style={{ padding: "2px 10px" }} title="Remove route" onClick={() => removeRoute(i)}>✕</button>
+          </div>
+        ))}
+        <button className="btn secondary" style={{ marginTop: 8 }} onClick={addRoute}>+ Add route</button>
+      </div>
+
       <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
         <input type="checkbox" style={{ width: "auto" }} checked={form.auto_deploy} onChange={(e) => setForm({ ...form, auto_deploy: e.target.checked })} />
         Auto-deploy on push

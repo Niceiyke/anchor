@@ -77,6 +77,10 @@ type Route struct {
 	Domain  string `json:"domain"`
 	Service string `json:"service,omitempty"`
 	Port    int    `json:"port,omitempty"`
+	// HealthPath, when set, is probed over HTTP inside this route's container
+	// after start (http://localhost:<port><path>). Empty means container-state
+	// gating only. The primary route falls back to the app-level HealthPath.
+	HealthPath string `json:"health_path,omitempty"`
 }
 
 // DeployRequest is the payload for CmdDeploy.

@@ -75,11 +75,49 @@ func (a *Agent) runDeploy(ctx context.Context, req protocol.DeployRequest) {
 	}
 
 	a.emitStatus(depID, protocol.PhaseHealthCheck, "Checking health", string(stack))
-	if err := a.gateHealth(ctx, req, target); err != nil {
+	if err := a.gateHealth(ctx, req, buildHealthTargets(req, routes, target)); err != nil {
 		a.fail(depID, "health check failed", err)
 		return
 	}
 	a.emitStatus(depID, protocol.PhaseSuccess, "Deployment successful", string(stack))
+}
+
+// buildHealthTargets derives the containers the health gate must clear. For a
+// multi-service Compose app that's one per routed service — so a broken
+// secondary service fails the deploy — each using its own optional health path
+// (the primary also inherits the app-level HealthPath). Otherwise it's the
+// single primary container (Dockerfile apps, or a Compose app with no public
+// routes), checked with the app-level HealthPath.
+func buildHealthTargets(req protocol.DeployRequest, routes []resolvedRoute, primary routeTarget) []healthTarget {
+	var hasRouteContainers bool
+	for _, r := range routes {
+		if r.container != "" {
+			hasRouteContainers = true
+			break
+		}
+	}
+	if hasRouteContainers {
+		var ht []healthTarget
+		for i, r := range routes {
+			if r.container == "" {
+				continue
+			}
+			path := r.healthPath
+			if path == "" && i == 0 {
+				path = req.HealthPath
+			}
+			ht = append(ht, healthTarget{container: r.container, port: r.port, path: path, label: r.host})
+		}
+		return ht
+	}
+	if primary.container != "" {
+		port := primary.port
+		if port == 0 {
+			port = req.ContainerPort
+		}
+		return []healthTarget{{container: primary.container, port: port, path: req.HealthPath, label: sanitize(req.AppName)}}
+	}
+	return nil
 }
 
 func (a *Agent) fail(depID, msg string, err error) {

@@ -11,28 +11,52 @@ import (
 	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
-// gateHealth blocks until the freshly-deployed app looks healthy, or returns an
-// error once the timeout elapses. A returned error fails the deployment (and may
-// trigger an auto-rollback on the control plane). When the app container can't
-// be identified it returns nil — we don't fail a deploy we can't evaluate.
-func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest, target routeTarget) error {
-	container := target.container
-	if container == "" {
+// healthTarget is one container the health gate must clear: its container, the
+// port to probe, an optional HTTP path, and a label for log messages.
+type healthTarget struct {
+	container string
+	port      int
+	path      string
+	label     string // service / app name, for logs
+}
+
+// gateHealth blocks until every target looks healthy, or returns an error once
+// the (shared) timeout elapses. A returned error fails the deployment (and may
+// trigger an auto-rollback on the control plane). With no targets it returns
+// nil — we don't fail a deploy we can't evaluate.
+//
+// Targets are checked in order; for a multi-service app this means each routed
+// service is gated, so a crash-looping or failing secondary service fails the
+// deploy too.
+func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest, targets []healthTarget) error {
+	if len(targets) == 0 {
 		a.emitLog(req.DeploymentID, "", "system", "WARN: could not identify app container; skipping health gate")
 		return nil
 	}
-	port := target.port
-	if port == 0 {
-		port = req.ContainerPort
-	}
-
 	timeout := time.Duration(req.HealthTimeoutSecs) * time.Second
 	if timeout <= 0 {
 		timeout = 45 * time.Second
 	}
+	for _, t := range targets {
+		if err := a.gateOne(ctx, req, t, timeout); err != nil {
+			if len(targets) > 1 {
+				return fmt.Errorf("%s: %w", t.label, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// gateOne waits up to timeout for a single container to become healthy.
+func (a *Agent) gateOne(ctx context.Context, req protocol.DeployRequest, t healthTarget, timeout time.Duration) error {
+	container, port := t.container, t.port
+	if port == 0 {
+		port = req.ContainerPort
+	}
 	deadline := time.Now().Add(timeout)
 	a.emitLog(req.DeploymentID, "", "system",
-		fmt.Sprintf("Health check: waiting up to %s for %s to become healthy", timeout, short12(container)))
+		fmt.Sprintf("Health check: waiting up to %s for %s (%s) to become healthy", timeout, t.label, short12(container)))
 
 	var lastErr error
 	for {
@@ -41,8 +65,8 @@ func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest, targ
 		case err != nil:
 			lastErr = err
 		case st.health == "healthy":
-			a.emitLog(req.DeploymentID, "", "system", "Health check passed (docker healthcheck reports healthy)")
-			return a.httpProbe(ctx, req, container, port)
+			a.emitLog(req.DeploymentID, "", "system", t.label+": healthy (docker healthcheck)")
+			return a.httpProbe(ctx, req, container, port, t.path)
 		case st.health == "unhealthy":
 			lastErr = fmt.Errorf("container reports unhealthy")
 		case st.health == "starting":
@@ -54,8 +78,8 @@ func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest, targ
 		default:
 			// Running, no docker healthcheck defined. An optional HTTP path probe
 			// is the only remaining gate; if it passes (or none is set), we're good.
-			if perr := a.httpProbe(ctx, req, container, port); perr == nil {
-				a.emitLog(req.DeploymentID, "", "system", "Health check passed")
+			if perr := a.httpProbe(ctx, req, container, port, t.path); perr == nil {
+				a.emitLog(req.DeploymentID, "", "system", t.label+": healthy")
 				return nil
 			} else {
 				lastErr = perr
@@ -73,14 +97,13 @@ func (a *Agent) gateHealth(ctx context.Context, req protocol.DeployRequest, targ
 	}
 }
 
-// httpProbe checks req.HealthPath over HTTP from inside the container. It's
-// best-effort: if the image ships neither wget nor curl, it warns and passes
-// (container-state gating still applies). A non-2xx/conn error fails the gate.
-func (a *Agent) httpProbe(ctx context.Context, req protocol.DeployRequest, container string, port int) error {
-	if req.HealthPath == "" {
+// httpProbe checks path over HTTP from inside the container. It's best-effort:
+// if the image ships neither wget nor curl, it warns and passes (container-state
+// gating still applies). A non-2xx/conn error fails the gate.
+func (a *Agent) httpProbe(ctx context.Context, req protocol.DeployRequest, container string, port int, path string) error {
+	if path == "" {
 		return nil
 	}
-	path := req.HealthPath
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
