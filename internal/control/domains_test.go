@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oyomworld/anchor/internal/store"
+	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
 func TestNormalizeBaseDomain(t *testing.T) {
@@ -79,5 +80,72 @@ func TestHandleTLSCheck(t *testing.T) {
 	}
 	if code := check(""); code != 400 {
 		t.Errorf("empty domain: got %d, want 400", code)
+	}
+}
+
+func TestValidHostname(t *testing.T) {
+	ok := []string{"a.example.com", "x-y.apps.example.com", "1.2.example.io"}
+	bad := []string{"", "nodot", "-bad.example.com", "bad-.example.com", "a..example.com", "UP.example.com", "a.exa mple.com"}
+	for _, d := range ok {
+		if !validHostname(d) {
+			t.Errorf("validHostname(%q) = false, want true", d)
+		}
+	}
+	for _, d := range bad {
+		if validHostname(d) {
+			t.Errorf("validHostname(%q) = true, want false", d)
+		}
+	}
+}
+
+func TestNormalizeRoutes(t *testing.T) {
+	srv, st := newTestServer(t)
+	_ = st.SaveSettings(store.Settings{AdminUser: "admin", BaseDomain: "apps.example.com"})
+
+	// Happy path: explicit domain kept, empty domain auto-assigned per service.
+	if got, err := srv.normalizeRoutes("shop", "shop.apps.example.com", nil); err != nil || len(got) != 0 {
+		t.Fatalf("nil routes: got %+v err %v", got, err)
+	}
+	got, err := srv.normalizeRoutes("shop", "shop.apps.example.com", []protocol.Route{
+		{Service: "api", Domain: "API.example.com"},
+		{Service: "admin"},
+	})
+	if err != nil {
+		t.Fatalf("normalizeRoutes: %v", err)
+	}
+	if got[0].Domain != "api.example.com" {
+		t.Errorf("explicit domain not lowercased/kept: %q", got[0].Domain)
+	}
+	if got[1].Domain != "shop-admin.apps.example.com" {
+		t.Errorf("auto-assigned route domain = %q", got[1].Domain)
+	}
+
+	// Errors: missing service, duplicate domain, collision with primary.
+	if _, err := srv.normalizeRoutes("shop", "shop.apps.example.com", []protocol.Route{{Domain: "x.example.com"}}); err == nil {
+		t.Error("expected error for route without service")
+	}
+	if _, err := srv.normalizeRoutes("shop", "shop.apps.example.com", []protocol.Route{
+		{Service: "a", Domain: "dup.example.com"}, {Service: "b", Domain: "dup.example.com"},
+	}); err == nil {
+		t.Error("expected error for duplicate route domain")
+	}
+	if _, err := srv.normalizeRoutes("shop", "shop.apps.example.com", []protocol.Route{
+		{Service: "a", Domain: "shop.apps.example.com"},
+	}); err == nil {
+		t.Error("expected error for route colliding with primary domain")
+	}
+}
+
+func TestTLSCheckMatchesRouteDomain(t *testing.T) {
+	srv, st := newTestServer(t)
+	_ = st.CreateApp(store.App{
+		ID: "app_1", Name: "shop", ServerID: "s1", Domain: "shop.apps.example.com",
+		Routes: []protocol.Route{{Service: "api", Domain: "api.example.com"}},
+	})
+	r := httptest.NewRequest("GET", "/tls/check?domain=api.example.com", nil)
+	w := httptest.NewRecorder()
+	srv.handleTLSCheck(w, r)
+	if w.Code != 200 {
+		t.Fatalf("route domain should be approved for TLS: got %d", w.Code)
 	}
 }

@@ -5,7 +5,41 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oyomworld/anchor/pkg/protocol"
 )
+
+func TestEffectiveRoutes(t *testing.T) {
+	// Explicit routes win.
+	rs := effectiveRoutes(protocol.DeployRequest{
+		Domain: "ignored.example.com", ContainerPort: 3000,
+		Routes: []protocol.Route{{Domain: "a.example.com", Service: "web"}},
+	})
+	if len(rs) != 1 || rs[0].Domain != "a.example.com" {
+		t.Fatalf("explicit routes not preferred: %+v", rs)
+	}
+	// Legacy single Domain/Service/Port synthesizes one route.
+	rs = effectiveRoutes(protocol.DeployRequest{Domain: "b.example.com", Service: "api", ContainerPort: 8080})
+	if len(rs) != 1 || rs[0].Domain != "b.example.com" || rs[0].Service != "api" || rs[0].Port != 8080 {
+		t.Fatalf("legacy route not synthesized: %+v", rs)
+	}
+	// No domain, no routes -> none.
+	if rs := effectiveRoutes(protocol.DeployRequest{}); rs != nil {
+		t.Fatalf("expected no routes, got %+v", rs)
+	}
+}
+
+func TestRouteAlias(t *testing.T) {
+	if got := routeAlias("blog", "web", false); got != "blog" {
+		t.Errorf("single-route alias = %q, want %q", got, "blog")
+	}
+	if got := routeAlias("blog", "web", true); got != "blog-web" {
+		t.Errorf("multi-route alias = %q, want %q", got, "blog-web")
+	}
+	if got := routeAlias("blog", "", true); got != "blog" {
+		t.Errorf("multi-route alias w/o service = %q, want %q", got, "blog")
+	}
+}
 
 func TestWriteEnvFile(t *testing.T) {
 	cases := []struct {

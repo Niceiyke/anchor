@@ -40,15 +40,16 @@ func (a *Agent) runDeploy(ctx context.Context, req protocol.DeployRequest) {
 	a.emitLog(depID, "", "system", "Detected stack: "+string(stack))
 	a.emitStatus(depID, protocol.PhaseBuilding, "Building image", string(stack))
 
+	var routes []resolvedRoute
 	var target routeTarget
 	switch stack {
 	case stackCompose:
-		t, err := a.deployCompose(ctx, req, appDir)
+		rs, prim, err := a.deployCompose(ctx, req, appDir)
 		if err != nil {
 			a.fail(depID, "compose deploy failed", err)
 			return
 		}
-		target = t
+		routes, target = rs, prim
 	case stackDockerfile:
 		if err := a.deployDockerfile(ctx, req, appDir); err != nil {
 			a.fail(depID, "dockerfile deploy failed", err)
@@ -56,18 +57,19 @@ func (a *Agent) runDeploy(ctx context.Context, req protocol.DeployRequest) {
 		}
 		name := sanitize(req.AppName)
 		target = routeTarget{container: name, host: name, port: req.ContainerPort}
+		// One container backs every route; each route's domain maps to it.
+		for _, r := range effectiveRoutes(req) {
+			port := r.Port
+			if port == 0 {
+				port = req.ContainerPort
+			}
+			routes = append(routes, resolvedRoute{domain: r.Domain, host: name, port: port})
+		}
 	}
 
 	a.emitStatus(depID, protocol.PhaseConfiguring, "Configuring routing", string(stack))
-	if req.Domain != "" {
-		host, port := target.host, target.port
-		if host == "" {
-			host = sanitize(req.AppName)
-		}
-		if port == 0 {
-			port = req.ContainerPort
-		}
-		if err := a.configureCaddy(ctx, req, host, port); err != nil {
+	if len(routes) > 0 {
+		if err := a.configureCaddy(ctx, req, routes); err != nil {
 			a.emitLog(depID, "", "system", "WARN: caddy config failed: "+err.Error())
 		}
 	}
@@ -148,7 +150,7 @@ func detectStack(dir string) stackType {
 // then resolves which service to publish/health-check. When req.ComposeFile is
 // set it's passed via -f; Compose then treats that file's directory as the
 // project root, so the .env is written there.
-func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, appDir string) (routeTarget, error) {
+func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, appDir string) ([]resolvedRoute, routeTarget, error) {
 	args := []string{"compose"}
 	envDir := appDir
 	if req.ComposeFile != "" {
@@ -156,7 +158,7 @@ func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, a
 		envDir = filepath.Dir(filepath.Join(appDir, req.ComposeFile))
 	}
 	if err := writeEnvFile(envDir, req.EnvVars); err != nil {
-		return routeTarget{}, err
+		return nil, routeTarget{}, err
 	}
 	if len(req.EnvVars) > 0 {
 		// Compose only uses .env for ${VAR} interpolation — it does not inject
@@ -169,11 +171,11 @@ func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, a
 	args = append(args, "-p", project, "up", "-d", "--build", "--remove-orphans")
 	a.emitStatus(req.DeploymentID, protocol.PhaseStarting, "Starting services", string(stackCompose))
 	if err := a.run(ctx, req.DeploymentID, appDir, "docker", args...); err != nil {
-		return routeTarget{}, err
+		return nil, routeTarget{}, err
 	}
-	// Pick the web service, derive its port, and attach it to anchor_net so
-	// Caddy can reach it by name — all without the user editing their compose.
-	return a.resolveComposeRoute(ctx, req)
+	// Select each route's service, derive its port, and attach it to anchor_net
+	// so Caddy can reach it by name — all without the user editing their compose.
+	return a.resolveComposeRoutes(ctx, req)
 }
 
 // deployDockerfile builds an image and runs a single container, replacing any

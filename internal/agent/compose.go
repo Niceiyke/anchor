@@ -10,14 +10,44 @@ import (
 	"github.com/oyomworld/anchor/pkg/protocol"
 )
 
-// routeTarget is the resolved destination of a deploy: the container Anchor
-// health-checks, and the host:port Caddy proxies public traffic to. For the
-// Dockerfile stack host==container==<app>; for Compose it's the selected
-// service's container, reachable on anchor_net under the <project> alias.
+// routeTarget is the container Anchor health-checks (the app's "primary"
+// service) plus the host:port it lives at. For the Dockerfile stack
+// host==container==<app>; for Compose it's the first route's container.
 type routeTarget struct {
 	container string // container id or name (for health gating); "" if undecidable
 	host      string // network alias / container name Caddy proxies to
 	port      int    // upstream port
+}
+
+// resolvedRoute is one public route ready for Caddy: a domain pointing at a
+// host:port reachable on anchor_net.
+type resolvedRoute struct {
+	domain string
+	host   string // network alias / container name
+	port   int
+}
+
+// effectiveRoutes is the complete list of public routes for a deploy. Explicit
+// Routes win; otherwise the single Domain/Service/ContainerPort is the one
+// route; an app with no domain has none.
+func effectiveRoutes(req protocol.DeployRequest) []protocol.Route {
+	if len(req.Routes) > 0 {
+		return req.Routes
+	}
+	if req.Domain != "" {
+		return []protocol.Route{{Domain: req.Domain, Service: req.Service, Port: req.ContainerPort}}
+	}
+	return nil
+}
+
+// routeAlias is the anchor_net alias (and Caddy upstream host) for a service.
+// Single-route apps keep the bare <project> alias (back-compat); multi-route
+// apps get a per-service <project>-<service> alias so routes don't collide.
+func routeAlias(project, service string, multi bool) string {
+	if multi && service != "" {
+		return sanitize(project + "-" + service)
+	}
+	return project
 }
 
 // composeContainer describes one running container of a Compose project with
@@ -69,55 +99,83 @@ func (a *Agent) composeContainers(ctx context.Context, project string) ([]compos
 	return cs, nil
 }
 
-// resolveComposeRoute discovers the project's containers, selects the one to
-// publish, derives its upstream port, and (when a domain is set) attaches it to
-// anchor_net under the project alias so Caddy can reach it by name.
+// resolveComposeRoutes discovers the project's containers and resolves every
+// public route: it selects each route's service container, derives its upstream
+// port, and attaches it to anchor_net under a per-service alias so Caddy can
+// reach it by name. It also returns the primary target (the first resolved
+// route, or — when the app has no routes — the inferred web service) for the
+// health gate.
 //
-// A returned target with container=="" means the choice was ambiguous; the
-// caller emits guidance but does not fail the deploy (we can't health-check or
-// route what we can't identify, but the stack itself is up).
-func (a *Agent) resolveComposeRoute(ctx context.Context, req protocol.DeployRequest) (routeTarget, error) {
+// Routes that can't be resolved are skipped with guidance; the deploy isn't
+// failed for them (the stack itself is up).
+func (a *Agent) resolveComposeRoutes(ctx context.Context, req protocol.DeployRequest) ([]resolvedRoute, routeTarget, error) {
 	project := sanitize(req.AppName)
 	cs, err := a.composeContainers(ctx, project)
 	if err != nil {
-		return routeTarget{}, fmt.Errorf("list compose containers: %w", err)
+		return nil, routeTarget{}, fmt.Errorf("list compose containers: %w", err)
 	}
 	if len(cs) == 0 {
-		return routeTarget{}, fmt.Errorf("no running containers for compose project %s", project)
+		return nil, routeTarget{}, fmt.Errorf("no running containers for compose project %s", project)
 	}
 
-	target, ok := selectComposeTarget(cs, req.Service, req.ContainerPort)
-	if !ok {
-		a.emitLog(req.DeploymentID, "", "system", fmt.Sprintf(
-			"WARN: %d services in this project and none clearly match — can't tell which to publish. "+
-				"Set the app's \"service\" to the web service's name (e.g. %q), or set its port to one a service listens on.",
-			len(cs), cs[0].service))
-		return routeTarget{}, nil
+	want := effectiveRoutes(req)
+	if len(want) == 0 {
+		// No public routing; still pick a health target so the deploy is gated.
+		var primary routeTarget
+		if t, ok := selectComposeTarget(cs, req.Service, req.ContainerPort); ok {
+			port, _ := resolveUpstreamPort(t, req.ContainerPort)
+			primary = routeTarget{container: t.id, host: project, port: port}
+		}
+		return nil, primary, nil
 	}
 
-	port, adjusted := resolveUpstreamPort(target, req.ContainerPort)
-	if adjusted {
-		a.emitLog(req.DeploymentID, "", "system", fmt.Sprintf(
-			"Note: service %q does not expose port %d; routing to the port it does expose (%d).",
-			target.service, req.ContainerPort, port))
-	}
-	rt := routeTarget{container: target.id, host: project, port: port}
-
-	if req.Domain != "" {
+	multi := len(want) > 1
+	var routes []resolvedRoute
+	var primary routeTarget
+	for _, r := range want {
+		target, ok := selectComposeTarget(cs, r.Service, r.Port)
+		if !ok {
+			a.emitLog(req.DeploymentID, "", "system", fmt.Sprintf(
+				"WARN: can't route %s — no service matches (service=%q port=%d). Set the route's service to one of: %s.",
+				r.Domain, r.Service, r.Port, strings.Join(serviceNames(cs), ", ")))
+			continue
+		}
+		port, adjusted := resolveUpstreamPort(target, r.Port)
+		if adjusted {
+			a.emitLog(req.DeploymentID, "", "system", fmt.Sprintf(
+				"Note: service %q does not expose port %d; routing %s to the port it does expose (%d).",
+				target.service, r.Port, r.Domain, port))
+		}
 		if port == 0 {
 			a.emitLog(req.DeploymentID, "", "system", fmt.Sprintf(
-				"WARN: could not determine a port for service %q — set the app's port so Caddy can reach it.",
-				target.service))
+				"WARN: could not determine a port for service %q (%s) — set the route's port so Caddy can reach it.",
+				target.service, r.Domain))
 		}
-		if err := a.attachToNetwork(ctx, target.id, project); err != nil {
+		alias := routeAlias(project, target.service, multi)
+		if err := a.attachToNetwork(ctx, target.id, alias); err != nil {
 			a.emitLog(req.DeploymentID, "", "system", "WARN: attach to "+anchorNetwork+" failed: "+err.Error())
 		} else {
 			a.emitLog(req.DeploymentID, "", "system", fmt.Sprintf(
 				"Routed %s → %s:%d on %s (service %q, container %s)",
-				req.Domain, project, port, anchorNetwork, target.service, short12(target.id)))
+				r.Domain, alias, port, anchorNetwork, target.service, short12(target.id)))
+		}
+		routes = append(routes, resolvedRoute{domain: r.Domain, host: alias, port: port})
+		if primary.container == "" {
+			primary = routeTarget{container: target.id, host: alias, port: port}
 		}
 	}
-	return rt, nil
+	return routes, primary, nil
+}
+
+// serviceNames lists the compose service names for an error hint.
+func serviceNames(cs []composeContainer) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		if c.service != "" {
+			out = append(out, c.service)
+		}
+	}
+	return out
 }
 
 // attachToNetwork connects a container to anchor_net under the given alias so

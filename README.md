@@ -291,14 +291,28 @@ instead. Both implement the same `store.Store` interface.
 
 ## Routing & HTTPS
 
-Each VPS runs Caddy on `anchor_net`. On deploy the agent writes
-`<domain> { reverse_proxy <app>:<port> }` to `/etc/anchor/caddy/apps/<app>.caddy`
-and reloads Caddy, which provisions TLS automatically. Point the domain's DNS at
-the VPS and it's live.
+Each VPS runs Caddy on `anchor_net`. On deploy the agent writes a
+`<domain> { reverse_proxy <upstream> }` block per route into a single
+`/etc/anchor/caddy/apps/<app>.caddy` file (rewritten atomically each deploy, so
+stale routes can't linger) and reloads Caddy, which provisions TLS
+automatically. Point each domain's DNS at the VPS and it's live.
 
-For `docker-compose` apps, the agent **auto-attaches** the web container to
-`anchor_net` with the app-name alias after `compose up` — no compose edits
-needed. It picks which service to publish in this order:
+### Multiple services on multiple domains
+
+A Compose app can publish more than one service, each on its own domain — e.g.
+`app.example.com → web` and `api.example.com → api`. Set **routes** on the app
+(`PATCH /api/apps/{id}` with
+`{"routes":[{"service":"web","domain":"app.example.com"},{"service":"api","domain":"api.example.com","port":8080}]}`).
+Each route needs a `service`; `port` is optional (auto-detected like below); an
+empty `domain` is auto-assigned a `<app>-<service>.<base_domain>` subdomain when a
+base domain is configured. Routed services get a per-service `<app>-<service>`
+alias on `anchor_net`; a single-route app keeps the bare `<app>` alias. The
+control plane approves every route domain for on-demand TLS and provisions a
+Cloudflare A record for each. The **first** route is the app's primary and is
+what the health gate checks.
+
+When no routes are set, the single Domain/Service/ContainerPort is the one
+route. The agent picks which service to publish in this order:
 
 1. the app's **service** name, if set (most robust for multi-service stacks —
    set it in the app's settings or `PATCH /api/apps/{id}` with `{"service": "web"}`);

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oyomworld/anchor/pkg/protocol"
+
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
 )
 
@@ -60,6 +62,7 @@ CREATE TABLE IF NOT EXISTS apps (
 	last_good_sha  TEXT NOT NULL DEFAULT '',
 	compose_file   TEXT NOT NULL DEFAULT '',
 	service        TEXT NOT NULL DEFAULT '',
+	routes         TEXT NOT NULL DEFAULT '[]',
 	env_secret     TEXT NOT NULL DEFAULT '{}',
 	created_at     TEXT NOT NULL
 );
@@ -134,6 +137,7 @@ CREATE TABLE IF NOT EXISTS users (
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN last_good_sha TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN compose_file TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN service TEXT NOT NULL DEFAULT ''`)
+		s.db.Exec(`ALTER TABLE apps ADD COLUMN routes TEXT NOT NULL DEFAULT '[]'`)
 		s.db.Exec(`ALTER TABLE apps ADD COLUMN env_secret TEXT NOT NULL DEFAULT '{}'`)
 		s.db.Exec(`ALTER TABLE servers ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''`)
 	}
@@ -264,22 +268,23 @@ func (s *sqliteStore) DeleteServer(id string) error {
 
 func scanApp(r scanner) (App, error) {
 	var v App
-	var envRaw, secretRaw, createdAt string
+	var envRaw, routesRaw, secretRaw, createdAt string
 	var auto int
 	if err := r.Scan(&v.ID, &v.Name, &v.ServerID, &v.RepoFullName, &v.RepoURL, &v.Branch,
-		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &v.ComposeFile, &v.Service, &secretRaw, &createdAt); err != nil {
+		&v.Domain, &v.ContainerPort, &auto, &envRaw, &v.LastGoodSHA, &v.ComposeFile, &v.Service, &routesRaw, &secretRaw, &createdAt); err != nil {
 		return v, err
 	}
 	v.AutoDeploy = auto == 1
 	v.CreatedAt = tsParse(createdAt)
 	v.EnvVars = map[string]string{}
 	_ = json.Unmarshal([]byte(envRaw), &v.EnvVars)
+	_ = json.Unmarshal([]byte(routesRaw), &v.Routes)
 	v.EnvSecret = map[string]bool{}
 	_ = json.Unmarshal([]byte(secretRaw), &v.EnvSecret)
 	return v, nil
 }
 
-const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, compose_file, service, env_secret, created_at`
+const appCols = `id, name, server_id, repo_full_name, repo_url, branch, domain, container_port, auto_deploy, env_vars, last_good_sha, compose_file, service, routes, env_secret, created_at`
 
 func (s *sqliteStore) ListApps() ([]App, error) {
 	rows, err := s.db.Query(`SELECT ` + appCols + ` FROM apps ORDER BY created_at`)
@@ -325,15 +330,15 @@ func (s *sqliteStore) AppsByRepo(fullName string) ([]App, error) {
 }
 
 func (s *sqliteStore) CreateApp(v App) error {
-	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO apps (`+appCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.ID, v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain,
-		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, secretJSON(v.EnvSecret), tsFmt(v.CreatedAt))
+		v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, routesJSON(v.Routes), secretJSON(v.EnvSecret), tsFmt(v.CreatedAt))
 	return err
 }
 
 func (s *sqliteStore) UpdateApp(v App) error {
-	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=?, compose_file=?, service=?, env_secret=? WHERE id=?`,
-		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, secretJSON(v.EnvSecret), v.ID)
+	res, err := s.db.Exec(`UPDATE apps SET name=?, server_id=?, repo_full_name=?, repo_url=?, branch=?, domain=?, container_port=?, auto_deploy=?, env_vars=?, last_good_sha=?, compose_file=?, service=?, routes=?, env_secret=? WHERE id=?`,
+		v.Name, v.ServerID, v.RepoFullName, v.RepoURL, v.Branch, v.Domain, v.ContainerPort, b2i(v.AutoDeploy), envJSON(v.EnvVars), v.LastGoodSHA, v.ComposeFile, v.Service, routesJSON(v.Routes), secretJSON(v.EnvSecret), v.ID)
 	return affected(res, err)
 }
 
@@ -602,6 +607,14 @@ func secretJSON(m map[string]bool) string {
 		m = map[string]bool{}
 	}
 	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+func routesJSON(r []protocol.Route) string {
+	if r == nil {
+		r = []protocol.Route{}
+	}
+	b, _ := json.Marshal(r)
 	return string(b)
 }
 

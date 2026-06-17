@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/oyomworld/anchor/pkg/protocol"
 )
@@ -18,7 +19,7 @@ import (
 //
 // The snippet directory and reload command are configurable so the same agent
 // works whether Caddy runs on the host or as a container.
-func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest, host string, port int) error {
+func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest, routes []resolvedRoute) error {
 	dir := a.cfg.CaddyDir
 	if dir == "" {
 		dir = "/etc/anchor/caddy/apps"
@@ -27,16 +28,21 @@ func (a *Agent) configureCaddy(ctx context.Context, req protocol.DeployRequest, 
 		return err
 	}
 
-	upstream := fmt.Sprintf("%s:%d", host, port)
-	// on_demand TLS lets Caddy obtain a cert for this domain on first request,
-	// gated by the control plane's /tls/check ask endpoint — so auto-assigned
-	// subdomains (and custom domains) get HTTPS without pre-provisioning.
-	snippet := fmt.Sprintf("%s {\n\treverse_proxy %s\n\ttls {\n\t\ton_demand\n\t}\n}\n", req.Domain, upstream)
+	// One file per app holds all its route blocks, so the snippet is rewritten
+	// atomically on every deploy (old routes can't linger). on_demand TLS lets
+	// Caddy obtain a cert for each domain on first request, gated by the control
+	// plane's /tls/check ask endpoint — so auto-assigned subdomains (and custom
+	// domains) get HTTPS without pre-provisioning.
+	var b strings.Builder
+	for _, r := range routes {
+		upstream := fmt.Sprintf("%s:%d", r.host, r.port)
+		fmt.Fprintf(&b, "%s {\n\treverse_proxy %s\n\ttls {\n\t\ton_demand\n\t}\n}\n", r.domain, upstream)
+		a.emitLog(req.DeploymentID, "", "system", "Wrote Caddy route: "+r.domain+" -> "+upstream)
+	}
 	path := filepath.Join(dir, sanitize(req.AppName)+".caddy")
-	if err := os.WriteFile(path, []byte(snippet), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return err
 	}
-	a.emitLog(req.DeploymentID, "", "system", "Wrote Caddy route: "+req.Domain+" -> "+upstream)
 
 	return a.reloadCaddy(ctx, req.DeploymentID)
 }

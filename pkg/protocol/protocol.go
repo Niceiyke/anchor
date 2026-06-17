@@ -68,6 +68,17 @@ type Command struct {
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
+// Route publishes one Compose service on one public domain. An app may have
+// several, so a multi-service stack can expose e.g. app.example.com -> web and
+// api.example.com -> api. Port 0 means "auto-detect from the service's exposed
+// port". Service is required when an app has more than one route (it's how the
+// agent tells the services apart).
+type Route struct {
+	Domain  string `json:"domain"`
+	Service string `json:"service,omitempty"`
+	Port    int    `json:"port,omitempty"`
+}
+
 // DeployRequest is the payload for CmdDeploy.
 type DeployRequest struct {
 	DeploymentID  string            `json:"deployment_id"`
@@ -88,6 +99,12 @@ type DeployRequest struct {
 	// the robust way to disambiguate a multi-service stack. Ignored for the
 	// Dockerfile stack (one container).
 	Service string `json:"service,omitempty"`
+
+	// Routes publishes additional services on their own domains (multi-service
+	// apps). When empty the single Domain/Service/ContainerPort above is the only
+	// route. When set, it is the complete list of public routes; the agent still
+	// health-checks the first one as the app's primary.
+	Routes []Route `json:"routes,omitempty"`
 
 	// Health gating. After the app starts, the agent waits for it to become
 	// healthy before reporting success; an unhealthy app fails the deploy (and
