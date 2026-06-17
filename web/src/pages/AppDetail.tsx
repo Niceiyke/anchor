@@ -133,8 +133,9 @@ export function AppDetail() {
 function DangerZone({ app }: { app: App }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [keepVolumes, setKeepVolumes] = useState(false);
   const del = useMutation({
-    mutationFn: () => api.del(`/api/apps/${app.id}`),
+    mutationFn: () => api.del(`/api/apps/${app.id}${keepVolumes ? "?keep_volume=true" : ""}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["apps"] });
       navigate({ to: "/apps" });
@@ -144,15 +145,27 @@ function DangerZone({ app }: { app: App }) {
     <div className="card" style={{ marginTop: 24, borderColor: "var(--red, #f85149)" }}>
       <strong>Danger zone</strong>
       <div className="row" style={{ marginTop: 8 }}>
-        <span className="muted">Delete this app and stop/remove its container(s) on the server. This cannot be undone.</span>
+        <span className="muted">
+          Delete this app and stop/remove its container(s) on the server.
+          {keepVolumes ? " Volumes are kept." : " Its volumes are deleted too."} This cannot be undone.
+        </span>
         <button
           className="btn danger"
           disabled={del.isPending}
-          onClick={() => { if (confirm(`Delete app "${app.name}"? Its container(s) will be stopped and removed.`)) del.mutate(); }}
+          onClick={() => {
+            const msg = keepVolumes
+              ? `Delete app "${app.name}"? Its container(s) will be stopped and removed; volumes will be kept.`
+              : `Delete app "${app.name}"? Its container(s) AND volumes will be permanently removed.`;
+            if (confirm(msg)) del.mutate();
+          }}
         >
           {del.isPending ? "Deleting…" : "Delete app"}
         </button>
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={keepVolumes} onChange={(e) => setKeepVolumes(e.target.checked)} />
+        Keep volumes (don't delete the app's data)
+      </label>
       {del.isError && <div className="error" style={{ marginTop: 8 }}>{(del.error as Error).message}</div>}
     </div>
   );

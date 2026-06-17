@@ -219,6 +219,7 @@ Open an app (**Applications → name**) for its full control surface:
   deployment in the list). Empty/manual deployments redeploy latest.
 - **Rollback** — redeploy the last *successful* commit (shown when available).
 - **Stop** — stop & remove the app's container(s) (`compose down` / `rm -f`).
+  Volumes are **kept** — stopping never destroys data.
 - **Configuration** (collapsible) — edit branch, domain, container port,
   compose file, the compose **service** to publish, and auto-deploy. Server and
   repo are immutable; changes apply on the next deploy. (`PATCH /api/apps/{id}`)
@@ -232,7 +233,11 @@ Open an app (**Applications → name**) for its full control surface:
   the Apps list) derived from the agent's container list. Works for both
   Dockerfile (`<name>`) and Compose (`<name>-<service>-N`) apps.
 - **Danger zone → Delete app** — removes the app *and* stops/removes its
-  container(s) on the server. Also available as a row action on the Apps list.
+  container(s) on the server. Volumes are deleted too by default (`compose
+  down -v` / `rm -fv`); tick **Keep volumes** to preserve the data (the API
+  opt-out is `DELETE /api/apps/{id}?keep_volume=true`). An attached managed
+  database lives in its own volume and is never touched. Also available as a row
+  action on the Apps list.
 
 ## Terminal
 

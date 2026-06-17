@@ -144,9 +144,14 @@ type ListContainersRequest struct {
 	RequestID string `json:"request_id"`
 }
 
-// StopAppRequest is the payload for CmdStopApp.
+// StopAppRequest is the payload for CmdStopApp. RemoveVolumes additionally
+// deletes the app's Docker volumes (Compose project volumes via `down -v`, and
+// anonymous volumes via `rm -fv`) — used when deleting an app, not when merely
+// stopping it. An attached managed database lives in its own container/volume,
+// so it is unaffected.
 type StopAppRequest struct {
-	AppName string `json:"app_name"`
+	AppName       string `json:"app_name"`
+	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
 }
 
 // ContainerActionRequest is the payload for CmdContainerAction. The reply is an

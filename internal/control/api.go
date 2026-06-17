@@ -414,7 +414,9 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	// Best-effort: stop/remove the running container(s) on the agent so we don't
 	// orphan them, then delete the record.
 	if a, err := s.store.GetApp(id); err == nil {
-		payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name})
+		// Volumes are removed by default; opt out with ?keep_volume=true.
+		removeVolumes := r.URL.Query().Get("keep_volume") != "true"
+		payload, _ := json.Marshal(protocol.StopAppRequest{AppName: a.Name, RemoveVolumes: removeVolumes})
 		cmd := protocol.Command{ID: randToken()[:12], Type: protocol.CmdStopApp, Data: payload}
 		s.hub.Send(a.ServerID, cmd) // best-effort; agent may be offline
 		for _, d := range appDomains(a) {
