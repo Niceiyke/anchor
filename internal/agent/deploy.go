@@ -189,12 +189,24 @@ func detectStack(dir string) stackType {
 // set it's passed via -f; Compose then treats that file's directory as the
 // project root, so the .env is written there.
 func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, appDir string) ([]resolvedRoute, routeTarget, error) {
-	args := []string{"compose"}
-	envDir := appDir
-	if req.ComposeFile != "" {
-		args = append(args, "-f", req.ComposeFile)
-		envDir = filepath.Dir(filepath.Join(appDir, req.ComposeFile))
+	// Resolve the compose file path. When the user didn't specify one, detect
+	// it explicitly so we can layer our override file on top (compose only
+	// auto-detects when NO -f flags are given, so we must always pass -f).
+	composeFile := req.ComposeFile
+	if composeFile == "" {
+		for _, name := range []string{"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"} {
+			if _, err := os.Stat(filepath.Join(appDir, name)); err == nil {
+				composeFile = name
+				break
+			}
+		}
+		if composeFile == "" {
+			return nil, routeTarget{}, fmt.Errorf("no compose file found in %s", appDir)
+		}
 	}
+
+	args := []string{"compose", "-f", composeFile}
+	envDir := filepath.Dir(filepath.Join(appDir, composeFile))
 	if err := writeEnvFile(envDir, req.EnvVars); err != nil {
 		return nil, routeTarget{}, err
 	}
@@ -210,7 +222,7 @@ func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, a
 	// Inject HOSTNAME=0.0.0.0 into every service so multi-network apps are
 	// reachable from Caddy on anchor_net (Docker always sets HOSTNAME to the
 	// container ID, which can break apps that bind to process.env.HOSTNAME).
-	if overridePath, err := a.writeAnchorOverride(ctx, appDir, req.ComposeFile, project); err != nil {
+	if overridePath, err := a.writeAnchorOverride(ctx, appDir, composeFile, project); err != nil {
 		a.emitLog(req.DeploymentID, "", "system",
 			"WARN: could not generate anchor compose override: "+err.Error())
 	} else if overridePath != "" {
