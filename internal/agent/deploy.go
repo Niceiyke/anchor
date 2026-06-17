@@ -206,6 +206,20 @@ func (a *Agent) deployCompose(ctx context.Context, req protocol.DeployRequest, a
 				"A service receives them only if it references them via `environment:` or `env_file:`.")
 	}
 	project := sanitize(req.AppName)
+
+	// Inject HOSTNAME=0.0.0.0 into every service so multi-network apps are
+	// reachable from Caddy on anchor_net (Docker always sets HOSTNAME to the
+	// container ID, which can break apps that bind to process.env.HOSTNAME).
+	if overridePath, err := a.writeAnchorOverride(ctx, appDir, req.ComposeFile, project); err != nil {
+		a.emitLog(req.DeploymentID, "", "system",
+			"WARN: could not generate anchor compose override: "+err.Error())
+	} else if overridePath != "" {
+		// Append AFTER the user's compose file so the override takes precedence.
+		args = append(args, "-f", overridePath)
+		a.emitLog(req.DeploymentID, "", "system",
+			"Injected HOSTNAME=0.0.0.0 into compose services")
+	}
+
 	args = append(args, "-p", project, "up", "-d", "--build", "--remove-orphans")
 	a.emitStatus(req.DeploymentID, protocol.PhaseStarting, "Starting services", string(stackCompose))
 	if err := a.run(ctx, req.DeploymentID, appDir, "docker", args...); err != nil {
@@ -231,6 +245,12 @@ func (a *Agent) deployDockerfile(ctx context.Context, req protocol.DeployRequest
 
 	args := []string{"run", "-d", "--name", name, "--restart", "unless-stopped",
 		"--label", "anchor.app=" + name, "--network", anchorNetwork}
+	// Docker always sets HOSTNAME to the container ID. Many apps use
+	// process.env.HOSTNAME to bind (e.g. Node.js server.js), which makes them
+	// listen on only one IP — unreachable from anchor_net. Inject 0.0.0.0 so the
+	// app binds on all interfaces. User env vars are added after so they can
+	// override this if they really want a specific hostname.
+	args = append(args, "-e", "HOSTNAME=0.0.0.0")
 	for k, v := range req.EnvVars {
 		args = append(args, "-e", k+"="+v)
 	}

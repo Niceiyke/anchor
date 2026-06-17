@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -271,4 +273,38 @@ func parseTCPPort(s string) int {
 		return 0
 	}
 	return n
+}
+
+// writeAnchorOverride generates a docker-compose override file that injects
+// HOSTNAME=0.0.0.0 into every service. Docker always sets HOSTNAME to the
+// container ID, which causes apps that use process.env.HOSTNAME to bind (e.g.
+// Node.js) to listen on only one IP. Since the agent attaches containers to
+// anchor_net after startup, the app needs to listen on all interfaces to be
+// reachable from Caddy.
+func (a *Agent) writeAnchorOverride(ctx context.Context, workDir, composeFile, project string) (string, error) {
+	cfgArgs := []string{"compose"}
+	if composeFile != "" {
+		cfgArgs = append(cfgArgs, "-f", composeFile)
+	}
+	cfgArgs = append(cfgArgs, "-p", project, "config", "--services")
+	cmd := exec.CommandContext(ctx, "docker", cfgArgs...)
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	services := strings.Fields(string(out))
+	if len(services) == 0 {
+		return "", nil
+	}
+	var b strings.Builder
+	b.WriteString("services:\n")
+	for _, s := range services {
+		fmt.Fprintf(&b, "  %s:\n    environment:\n      HOSTNAME: 0.0.0.0\n", s)
+	}
+	overridePath := filepath.Join(workDir, "docker-compose.anchor.yml")
+	if err := os.WriteFile(overridePath, []byte(b.String()), 0o644); err != nil {
+		return "", err
+	}
+	return overridePath, nil
 }
